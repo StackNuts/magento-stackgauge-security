@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <!-- Contributes this module's reporters to StackNuts_StackGauge's fleet report - see
+         StackNuts\StackGauge\Api\ReporterInterface for the contract and that module's own
+         README for the "Pluggable reporters" worked example this follows. -->
+    <type name="StackNuts\StackGauge\Model\ReporterPool">
+        <arguments>
+            <argument name="reporters" xsi:type="array">
+                <item name="security" xsi:type="object">StackNuts\StackGaugeSecurity\Model\Reporter\SecurityReporter</item>
+                <item name="admin_accounts" xsi:type="object">StackNuts\StackGaugeSecurity\Model\Reporter\AdminAccountsReporter</item>
+                <item name="config_hygiene" xsi:type="object">StackNuts\StackGaugeSecurity\Model\Reporter\ConfigHygieneReporter</item>
+            </argument>
+        </arguments>
+    </type>
+</config>
