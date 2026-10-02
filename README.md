@@ -32,6 +32,7 @@ outside that.
 | `SecurityReporter` | `security` | Admin path/maintenance-mode/sample-data state, sensitive paths exposed from the public storefront, VCS/backup/rogue-PHP files in the webroot, executable files under `pub/media`/`pub/static`, and anomalous core-file modification times |
 | `AdminAccountsReporter` | `admin_accounts` | Admin account counts, lockouts, failed-login/new-account/dormant-account signals, admin role separation, two-factor enrollment coverage |
 | `ConfigHygieneReporter` | `config_hygiene` | Dev/debug settings (template hints, CSS/JS minify, static signing) left in a risky production state |
+| `ContentSignatureReporter` | `content_signatures` | CMS block/page content, admin-editable HTML/JS config values, and suspicious `pub/` files checked against a hand-curated set of known webshell and Magecart-skimmer content signatures |
 
 `SecurityReporter` never reports the actual admin path, only whether it's still the Magento
 default - the real path stays private to your store.
@@ -62,6 +63,25 @@ detail about any admin account ever leaves your store.
   heuristic, not proof of tampering (a plain `touch` defeats it, and a legitimate hand-applied
   security patch looks identical to tampering by this signal alone) - reported as a warning,
   not critical, for exactly that reason. See `Model\Util\CoreFileTamperScanner`.
+
+## What `ContentSignatureReporter` checks, in detail
+
+- **`content_signature_matches`** - CMS block/page content, admin-editable HTML/JS config
+  values (`design/head/includes` and similar known injection points, plus any `core_config_data`
+  value containing a `<script` tag or `http-equiv` override), and files
+  `Model\Util\PubExecutableScanner` already flagged, each checked against a bundled signature
+  set (`etc/signatures.json`) of known webshell and Magecart-skimmer content patterns. CMS
+  content is read directly from `cms_block`/`cms_page` via keyset-paginated batches rather than
+  the repository API, so a large content library is scanned in full without a memory spike or
+  a single flat page-size cutoff - see `Model\ContentSource\CmsContentSource` for why.
+- Never reports the matched content itself, only the location (a block/page identifier, config
+  path, or file path) and which signature matched - a confirmed-malicious payload never travels
+  through the report pipeline, even to StackNuts' own dashboard.
+- **`content_scan_truncated`** - true only if the CMS content library is large enough to hit the
+  scan's safety backstop (20,000 rows per table); real stores essentially never hit this, and
+  it's surfaced rather than left silent if it ever does.
+- The bundled signature set is currently a small, hand-curated starter list. A larger,
+  community-reviewed set is planned as a future update to this module.
 
 ## Toggling individual checks
 

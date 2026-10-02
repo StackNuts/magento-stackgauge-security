@@ -10,6 +10,7 @@
                 <item name="security" xsi:type="object">StackNuts\StackGaugeSecurity\Model\Reporter\SecurityReporter</item>
                 <item name="admin_accounts" xsi:type="object">StackNuts\StackGaugeSecurity\Model\Reporter\AdminAccountsReporter</item>
                 <item name="config_hygiene" xsi:type="object">StackNuts\StackGaugeSecurity\Model\Reporter\ConfigHygieneReporter</item>
+                <item name="content_signatures" xsi:type="object">StackNuts\StackGaugeSecurity\Model\Reporter\ContentSignatureReporter</item>
             </argument>
         </arguments>
     </type>
