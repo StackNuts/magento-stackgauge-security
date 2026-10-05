@@ -239,7 +239,10 @@ class AdminAccountsReporter implements
                 MetricDefinition::AGGREGATION_LATEST,
                 MetricDefinition::OPERATOR_GT,
                 0,
-                1500
+                1500,
+                null,
+                description: '{value} admin accounts have no two-factor authentication, above the limit of {threshold}.',
+                impact: 'Accounts without a second factor are an easier route to a takeover.'
             ),
         ];
     }
