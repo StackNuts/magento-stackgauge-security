@@ -68,7 +68,9 @@ detail about any admin account ever leaves your store.
 
 - **`content_signature_matches`** - CMS block/page content, admin-editable HTML/JS config
   values (`design/head/includes` and similar known injection points, plus any `core_config_data`
-  value containing a `<script` tag or `http-equiv` override), and files
+  value containing a `<script` tag or `http-equiv` override), PHP files under `generated/code/`
+  (interceptors and other compiled Magento code, where backdoors persist across cache flushes -
+  bounded by a file-count cap, reported via `generated_code_scan_truncated`), and files
   `Model\Util\PubExecutableScanner` already flagged, each checked against a bundled signature
   set (`etc/signatures.json`) of known webshell and Magecart-skimmer content patterns. CMS
   content is read directly from `cms_block`/`cms_page` via keyset-paginated batches rather than

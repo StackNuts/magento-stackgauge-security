@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Store:etc/config.xsd">
+    <default>
+        <crontab>
+            <stackgaugesecurity>
+                <jobs>
+                    <stacknuts_stackgaugesecurity_fetch_signature_feed>
+                        <schedule>
+                            <cron_expr>15 3 * * *</cron_expr>
+                        </schedule>
+                    </stacknuts_stackgaugesecurity_fetch_signature_feed>
+                </jobs>
+            </stackgaugesecurity>
+        </crontab>
+        <stacknuts_stackgauge>
+            <general>
+                <signature_feed_enabled>1</signature_feed_enabled>
+            </general>
+        </stacknuts_stackgauge>
+    </default>
+</config>

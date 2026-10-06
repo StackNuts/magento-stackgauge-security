@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Config:etc/system_file.xsd">
+    <system>
+        <section id="stacknuts_stackgauge">
+            <group id="general">
+                <field id="signature_feed_enabled" translate="label comment" type="select" sortOrder="67" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Signature Feed Updates</label>
+                    <comment>Once a day, download the latest content-signature set from StackNuts' signatures repository and use it in place of the copy bundled with this module. The download is checksum-verified and validated before use; on any failure the previous set stays in place. Off keeps the bundled set only.</comment>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                </field>
+            </group>
+        </section>
+    </system>
+</config>

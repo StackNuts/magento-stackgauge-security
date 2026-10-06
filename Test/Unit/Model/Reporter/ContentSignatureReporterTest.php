@@ -16,6 +16,7 @@ use StackNuts\StackGaugeSecurity\Model\ContentSource\CmsContentSource;
 use StackNuts\StackGaugeSecurity\Model\ContentSource\DesignConfigContentSource;
 use StackNuts\StackGaugeSecurity\Model\Reporter\ContentSignatureReporter;
 use StackNuts\StackGaugeSecurity\Model\Util\ContentSignatureScanner;
+use StackNuts\StackGaugeSecurity\Model\Util\GeneratedCodeScanner;
 use StackNuts\StackGaugeSecurity\Model\Util\PubExecutableScanner;
 use StackNuts\StackGaugeSecurity\Model\Util\PubFileContentReader;
 use StackNuts\StackGaugeSecurity\Model\Util\SignatureStore;
@@ -71,6 +72,9 @@ class ContentSignatureReporterTest extends TestCase
         $pubFileContentReader = $this->createStub(PubFileContentReader::class);
         $pubFileContentReader->method('readContents')->willReturn([]);
 
+        $generatedCodeScanner = $this->createStub(GeneratedCodeScanner::class);
+        $generatedCodeScanner->method('scan')->willReturn(['matches' => [], 'truncated' => false]);
+
         return new ContentSignatureReporter(
             $signatureStore,
             $scanner,
@@ -78,6 +82,7 @@ class ContentSignatureReporterTest extends TestCase
             $designConfigContentSource,
             $pubExecutableScanner,
             $pubFileContentReader,
+            $generatedCodeScanner,
             new Field(),
             new Section()
         );

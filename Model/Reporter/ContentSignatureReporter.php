@@ -19,6 +19,7 @@ use StackNuts\StackGauge\Model\Reporter\Concern\PlatformSectionTrait;
 use StackNuts\StackGaugeSecurity\Model\ContentSource\CmsContentSource;
 use StackNuts\StackGaugeSecurity\Model\ContentSource\DesignConfigContentSource;
 use StackNuts\StackGaugeSecurity\Model\Util\ContentSignatureScanner;
+use StackNuts\StackGaugeSecurity\Model\Util\GeneratedCodeScanner;
 use StackNuts\StackGaugeSecurity\Model\Util\PubExecutableScanner;
 use StackNuts\StackGaugeSecurity\Model\Util\PubFileContentReader;
 use StackNuts\StackGaugeSecurity\Model\Util\SignatureStore;
@@ -49,6 +50,7 @@ class ContentSignatureReporter implements ReporterInterface, DeclaresCadenceInte
      * @param DesignConfigContentSource $designConfigContentSource
      * @param PubExecutableScanner $pubExecutableScanner
      * @param PubFileContentReader $pubFileContentReader
+     * @param GeneratedCodeScanner $generatedCodeScanner
      * @param Field $field
      * @param Section $section
      */
@@ -59,6 +61,7 @@ class ContentSignatureReporter implements ReporterInterface, DeclaresCadenceInte
         private readonly DesignConfigContentSource $designConfigContentSource,
         private readonly PubExecutableScanner $pubExecutableScanner,
         private readonly PubFileContentReader $pubFileContentReader,
+        private readonly GeneratedCodeScanner $generatedCodeScanner,
         private readonly Field $field,
         private readonly Section $section
     ) {
@@ -105,11 +108,13 @@ class ContentSignatureReporter implements ReporterInterface, DeclaresCadenceInte
         $signatures = $this->signatureStore->getSignatures();
 
         [$cmsMatches, $cmsTruncated] = $this->scanCmsContent($signatures);
+        $generated = $this->generatedCodeScanner->scan($signatures);
         $designConfigContent = $this->designConfigContentSource->getContent();
         $pubFileContent = $this->pubFileContentReader->readContents($this->pubExecutableScanner->scan());
 
         $matches = [
             ...$cmsMatches,
+            ...$generated['matches'],
             ...$this->scanner->scan($signatures, 'design_config', $designConfigContent),
             ...$this->scanner->scan($signatures, 'pub_php', $pubFileContent),
         ];
@@ -140,6 +145,10 @@ class ContentSignatureReporter implements ReporterInterface, DeclaresCadenceInte
                 // here rather than left silent, since neither competitor project this was
                 // compared against reports an equivalent "didn't scan everything" signal.
                 'content_scan_truncated' => $this->field->bool('CMS Content Scan Truncated', $cmsTruncated),
+                'generated_code_scan_truncated' => $this->field->bool(
+                    'generated/code Scan Truncated',
+                    $generated['truncated']
+                ),
             ]),
             'content_signature_matches' => $this->section->table(
                 'content_signature_matches',

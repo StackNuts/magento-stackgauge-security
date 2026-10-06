@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Cron:etc/crontab.xsd">
+    <group id="stackgaugesecurity">
+        <job name="stacknuts_stackgaugesecurity_fetch_signature_feed" instance="StackNuts\StackGaugeSecurity\Cron\FetchSignatureFeed" method="execute">
+            <config_path>crontab/stackgaugesecurity/jobs/stacknuts_stackgaugesecurity_fetch_signature_feed/schedule/cron_expr</config_path>
+        </job>
+    </group>
+</config>

@@ -8,46 +8,42 @@ declare(strict_types=1);
 
 namespace StackNuts\StackGaugeSecurity\Model\Util;
 
+use Magento\Framework\App\Filesystem\DirectoryList;
 use Magento\Framework\Filesystem;
 use Magento\Framework\Module\Dir;
 use Magento\Framework\Serialize\Serializer\Json;
 use Throwable;
 
 /**
- * Reads this module's bundled signature set (etc/signatures.json), the hand-curated,
- * StackNuts-authored content-signature list that ContentSignatureScanner matches against.
+ * The signature set ContentSignatureScanner matches against. Prefers the most recently fetched
+ * feed (see SignatureFeedFetcher), cached under var/, and falls back to the copy bundled in
+ * etc/signatures.json when there is no cache yet, or the cache fails validation.
  *
- * This is deliberately the only source right now - there is no live fetch of any kind. A
- * future auto-updating feed (fetched, checksum-verified, and cached) is expected to layer in
- * ahead of this as a preferred source later, falling back to this bundled file when unset or
- * stale - this class's single getSignatures() method is the seam that split will happen
- * behind, so nothing calling it needs to change.
- *
- * A missing or malformed signatures.json is never a hard error here - same reasoning as
- * StackGauge\Model\Util\ComposerLockReader: a broken signature file must not stop the
- * reporter from reporting whatever else it still can, so this returns an empty list rather
- * than throwing.
+ * Both sources are validated on every read, not just when they're written - a cache file that's
+ * corrupt or hand-edited is ignored rather than trusted. Neither source being usable is never an
+ * error: getSignatures() returns [] and the reporter still reports whatever else it can.
  */
 class SignatureStore
 {
     private const MODULE_NAME = 'StackNuts_StackGaugeSecurity';
     private const SIGNATURES_FILE = 'signatures.json';
+    private const CACHE_PATH = 'stacknuts_stackgaugesecurity/signatures.json';
 
     /**
      * @param Filesystem $filesystem
      * @param Dir $moduleDir
      * @param Json $json
+     * @param SignatureSetValidator $validator
      */
     public function __construct(
         private readonly Filesystem $filesystem,
         private readonly Dir $moduleDir,
-        private readonly Json $json
+        private readonly Json $json,
+        private readonly SignatureSetValidator $validator
     ) {
     }
 
     /**
-     * Every signature in the bundled set, or an empty list if it's missing/malformed.
-     *
      * Each entry has: id, name, severity, target (list<string>), pattern_type, pattern,
      * description.
      *
@@ -55,29 +51,54 @@ class SignatureStore
      */
     public function getSignatures(): array
     {
-        try {
-            $etcDir = $this->filesystem->getDirectoryReadByPath(
-                $this->moduleDir->getDir(self::MODULE_NAME, Dir::MODULE_ETC_DIR)
-            );
+        return $this->loadActiveSet()['signatures'] ?? [];
+    }
 
-            if (!$etcDir->isExist(self::SIGNATURES_FILE)) {
-                return [];
+    /**
+     * The active set's own version string (e.g. "2026.10.0"), or null if unknown - informational
+     * only, so the signature set age/identity is visible on the dashboard.
+     */
+    public function getVersion(): ?string
+    {
+        $version = $this->loadActiveSet()['version'] ?? null;
+
+        return is_string($version) ? $version : null;
+    }
+
+    /**
+     * The fetched cache if it's present and valid, otherwise the bundled set, otherwise an empty
+     * array.
+     *
+     * @return array<string, mixed>
+     */
+    private function loadActiveSet(): array
+    {
+        return $this->readValid($this->readCache()) ?? $this->readValid($this->readBundled()) ?? [];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function readCache(): ?array
+    {
+        try {
+            $var = $this->filesystem->getDirectoryRead(DirectoryList::VAR_DIR);
+            if (!$var->isExist(self::CACHE_PATH)) {
+                return null;
             }
 
-            $decoded = $this->json->unserialize($etcDir->readFile(self::SIGNATURES_FILE));
+            $decoded = $this->json->unserialize($var->readFile(self::CACHE_PATH));
 
-            return is_array($decoded['signatures'] ?? null) ? $decoded['signatures'] : [];
+            return is_array($decoded) ? $decoded : null;
         } catch (Throwable) {
-            return [];
+            return null;
         }
     }
 
     /**
-     * The bundled signature set's own version string (e.g. "2026.10.0"), or null if it's
-     * missing/malformed - opaque, informational only, so the reported signature set age/
-     * identity is visible on the dashboard.
+     * @return array<string, mixed>|null
      */
-    public function getVersion(): ?string
+    private function readBundled(): ?array
     {
         try {
             $etcDir = $this->filesystem->getDirectoryReadByPath(
@@ -90,9 +111,18 @@ class SignatureStore
 
             $decoded = $this->json->unserialize($etcDir->readFile(self::SIGNATURES_FILE));
 
-            return is_string($decoded['version'] ?? null) ? $decoded['version'] : null;
+            return is_array($decoded) ? $decoded : null;
         } catch (Throwable) {
             return null;
         }
+    }
+
+    /**
+     * @param array<string, mixed>|null $decoded
+     * @return array<string, mixed>|null
+     */
+    private function readValid(?array $decoded): ?array
+    {
+        return $decoded !== null && $this->validator->isValid($decoded) ? $decoded : null;
     }
 }
