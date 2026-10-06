@@ -158,4 +158,12 @@ class ContentSignatureReporterTest extends TestCase
 
         $this->assertTrue($fields['content_scan_truncated']->getValue());
     }
+
+    public function testCriticalMatchesIsAnAlertableMetricWithZeroThreshold(): void
+    {
+        $metrics = $this->reporter()->getTrackableMetrics();
+
+        $this->assertCount(1, $metrics);
+        $this->assertSame('content_signatures.critical_matches', $metrics[0]->getMetricKey());
+    }
 }

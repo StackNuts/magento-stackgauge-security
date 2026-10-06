@@ -12,6 +12,8 @@ use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
 use StackNuts\StackGauge\Api\Field\ArrayField;
 use StackNuts\StackGauge\Api\Field\Field;
+use StackNuts\StackGauge\Api\MetricCatalogInterface;
+use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
 use StackNuts\StackGauge\Model\Reporter\Concern\DailyCadenceTrait;
@@ -36,12 +38,17 @@ use StackNuts\StackGaugeSecurity\Model\Util\SignatureStore;
  * matched it - the report pipeline is not somewhere a confirmed-malicious payload should ever
  * travel, even to StackNuts' own dashboard.
  */
-class ContentSignatureReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface
+class ContentSignatureReporter implements
+    ReporterInterface,
+    DeclaresCadenceInterface,
+    DeclaresSectionInterface,
+    MetricCatalogInterface
 {
     use DailyCadenceTrait;
     use PlatformSectionTrait;
 
     private const SCHEMA_VERSION = '1.0';
+    private const METRIC_CRITICAL_MATCHES = 'content_signatures.critical_matches';
 
     /**
      * @param SignatureStore $signatureStore
@@ -135,9 +142,11 @@ class ContentSignatureReporter implements ReporterInterface, DeclaresCadenceInte
                     $matches !== [],
                     criticalWhen: true
                 ),
-                'critical_matches_detected' => $this->field->number(
+                'critical_matches_detected' => $this->field->trackableNumber(
                     'Critical Matches',
                     count($criticalMatches),
+                    self::METRIC_CRITICAL_MATCHES,
+                    MetricDefinition::AGGREGATION_LATEST,
                     severity: $criticalMatches !== [] ? Field::SEVERITY_CRITICAL : Field::SEVERITY_OK
                 ),
                 // Only ever true on a CMS content library large enough to hit
@@ -161,6 +170,27 @@ class ContentSignatureReporter implements ReporterInterface, DeclaresCadenceInte
                 // signature - skip the duplicate-row check rather than have that throw as if
                 // it were a reporter bug.
                 keyName: 'row_identity_not_checked'
+            ),
+        ];
+    }
+
+    /**
+     * Alertable metric: any critical signature match, anywhere the scanner looks. Threshold 0 - a
+     * confirmed webshell or skimmer is never a baseline to tolerate.
+     */
+    public function getTrackableMetrics(): array
+    {
+        return [
+            new MetricDefinition(
+                self::METRIC_CRITICAL_MATCHES,
+                'Content Signatures: Critical Matches',
+                MetricDefinition::AGGREGATION_LATEST,
+                MetricDefinition::OPERATOR_GT,
+                0,
+                1500,
+                null,
+                description: '{value} critical content-signature match(es) found, above the limit of {threshold}.',
+                impact: 'A known webshell or payment-skimmer pattern was found on this store. Investigate immediately.'
             ),
         ];
     }
