@@ -17,7 +17,7 @@
   "license": "proprietary",
   "require": {
     "php": "~8.1.0||~8.2.0||~8.3.0||~8.4.0",
-    "stacknuts/magento-stackgauge": ">=1.2 <2.0",
+    "stacknuts/magento-stackgauge": ">=0.3.3 <1.0",
     "magento/framework": ">=103.0 <104",
     "magento/module-user": ">=101.2 <102",
     "magento/module-cms": ">=104.0 <105"
