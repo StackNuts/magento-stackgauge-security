@@ -10,9 +10,11 @@ namespace StackNuts\StackGaugeSecurity\Test\Unit\Model\Util;
 
 use Magento\Framework\Filesystem;
 use Magento\Framework\Filesystem\Directory\ReadInterface;
+use Magento\Framework\Serialize\Serializer\Json;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use StackNuts\StackGaugeSecurity\Model\Util\PubFileContentReader;
+use StackNuts\StackGaugeSecurity\Model\Util\SafeFileReader;
 
 class PubFileContentReaderTest extends TestCase
 {
@@ -26,7 +28,7 @@ class PubFileContentReaderTest extends TestCase
         $filesystem = $this->createStub(Filesystem::class);
         $filesystem->method('getDirectoryRead')->willReturn($root);
 
-        $reader = new PubFileContentReader($filesystem);
+        $reader = new PubFileContentReader($filesystem, new SafeFileReader(new Json()));
         $content = $reader->readContents([['directory' => 'pub/media', 'path' => 'shell.php']]);
 
         $this->assertSame(['pub_file:pub/media/shell.php' => '<?php eval($_POST[1]); ?>'], $content);
@@ -41,7 +43,7 @@ class PubFileContentReaderTest extends TestCase
         $filesystem = $this->createStub(Filesystem::class);
         $filesystem->method('getDirectoryRead')->willReturn($root);
 
-        $reader = new PubFileContentReader($filesystem);
+        $reader = new PubFileContentReader($filesystem, new SafeFileReader(new Json()));
         $content = $reader->readContents([['directory' => 'pub/media', 'path' => 'huge.php']]);
 
         $this->assertSame([], $content);
@@ -55,7 +57,7 @@ class PubFileContentReaderTest extends TestCase
         $filesystem = $this->createStub(Filesystem::class);
         $filesystem->method('getDirectoryRead')->willReturn($root);
 
-        $reader = new PubFileContentReader($filesystem);
+        $reader = new PubFileContentReader($filesystem, new SafeFileReader(new Json()));
         $content = $reader->readContents([['directory' => 'pub/media', 'path' => 'gone.php']]);
 
         $this->assertSame([], $content);
@@ -66,7 +68,7 @@ class PubFileContentReaderTest extends TestCase
         $filesystem = $this->createStub(Filesystem::class);
         $filesystem->method('getDirectoryRead')->willThrowException(new RuntimeException('boom'));
 
-        $reader = new PubFileContentReader($filesystem);
+        $reader = new PubFileContentReader($filesystem, new SafeFileReader(new Json()));
 
         $this->assertSame([], $reader->readContents([['directory' => 'pub/media', 'path' => 'shell.php']]));
     }

@@ -17,7 +17,7 @@ use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
 use StackNuts\StackGauge\Model\Reporter\Concern\DailyCadenceTrait;
-use StackNuts\StackGauge\Model\Reporter\Concern\PlatformSectionTrait;
+use StackNuts\StackGauge\Model\Reporter\Concern\SecuritySectionTrait;
 use StackNuts\StackGaugeSecurity\Model\ContentSource\CmsContentSource;
 use StackNuts\StackGaugeSecurity\Model\ContentSource\DesignConfigContentSource;
 use StackNuts\StackGaugeSecurity\Model\Util\ContentSignatureScanner;
@@ -45,7 +45,7 @@ class ContentSignatureReporter implements
     MetricCatalogInterface
 {
     use DailyCadenceTrait;
-    use PlatformSectionTrait;
+    use SecuritySectionTrait;
 
     private const SCHEMA_VERSION = '1.0';
     private const METRIC_CRITICAL_MATCHES = 'content_signatures.critical_matches';

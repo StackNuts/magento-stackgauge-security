@@ -8,14 +8,9 @@ declare(strict_types=1);
 
 namespace StackNuts\StackGaugeSecurity\Model\Util;
 
-use FilesystemIterator;
 use Magento\Framework\App\Filesystem\DirectoryList;
 use Magento\Framework\Filesystem;
-use RecursiveCallbackFilterIterator;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
 use SplFileInfo;
-use Throwable;
 
 /**
  * Heuristic core-file tamper check: flags PHP files under vendor/magento/* and vendor/mage-os/*
@@ -54,9 +49,14 @@ class CoreFileTamperScanner
 
     /**
      * @param Filesystem $filesystem
+     * @param SafeFileReader $safeFileReader
+     * @param BoundedDirectoryWalker $walker
      */
-    public function __construct(private readonly Filesystem $filesystem)
-    {
+    public function __construct(
+        private readonly Filesystem $filesystem,
+        private readonly SafeFileReader $safeFileReader,
+        private readonly BoundedDirectoryWalker $walker
+    ) {
     }
 
     /**
@@ -66,14 +66,11 @@ class CoreFileTamperScanner
      */
     public function scan(): array
     {
-        try {
-            $vendorRoot = rtrim(
-                $this->filesystem->getDirectoryRead(DirectoryList::ROOT)->getAbsolutePath('vendor'),
-                '/'
-            );
-        } catch (Throwable) {
+        $vendorRoot = $this->safeFileReader->resolveAbsolutePath($this->filesystem, DirectoryList::ROOT, 'vendor');
+        if ($vendorRoot === null) {
             return [];
         }
+        $vendorRoot = rtrim($vendorRoot, '/');
 
         $matches = [];
         $totalVisited = 0;
@@ -139,23 +136,17 @@ class CoreFileTamperScanner
     {
         $mtimesByPath = [];
 
-        try {
-            $flags = FilesystemIterator::SKIP_DOTS | FilesystemIterator::UNIX_PATHS;
-            $filtered = new RecursiveCallbackFilterIterator(
-                new RecursiveDirectoryIterator($packagePath, $flags),
-                static fn (SplFileInfo $file): bool => !$file->isLink()
-            );
-
-            $iterator = new RecursiveIteratorIterator($filtered, RecursiveIteratorIterator::SELF_FIRST);
-            $iterator->setMaxDepth(self::MAX_DEPTH);
-
-            foreach ($iterator as $file) {
+        $this->walker->walk(
+            $packagePath,
+            self::MAX_DEPTH,
+            static fn (SplFileInfo $file): bool => true,
+            function (SplFileInfo $file) use (&$mtimesByPath, $packagePath): bool {
                 if (count($mtimesByPath) >= self::MAX_FILES_PER_PACKAGE) {
-                    break;
+                    return false;
                 }
 
                 if (!$file->isFile() || strtolower($file->getExtension()) !== 'php') {
-                    continue;
+                    return true;
                 }
 
                 $mtime = $file->getMTime();
@@ -163,11 +154,10 @@ class CoreFileTamperScanner
                     $relativePath = ltrim(substr($file->getPathname(), strlen($packagePath)), '/');
                     $mtimesByPath[$relativePath] = $mtime;
                 }
+
+                return true;
             }
-        // phpcs:ignore Magento2.CodeAnalysis.EmptyBlock.DetectedCatch
-        } catch (Throwable) {
-            // Best-effort - whatever was collected before a permission error or similar still counts.
-        }
+        );
 
         if (count($mtimesByPath) < 2) {
             // Nothing to compare against - a single-file (or empty) package has no "the rest

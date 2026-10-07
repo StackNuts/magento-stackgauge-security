@@ -16,7 +16,7 @@ use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
 use StackNuts\StackGauge\Model\Reporter\Concern\DailyCadenceTrait;
-use StackNuts\StackGauge\Model\Reporter\Concern\PlatformSectionTrait;
+use StackNuts\StackGauge\Model\Reporter\Concern\SecuritySectionTrait;
 
 /**
  * Flags a fixed list of dev/debug settings that are fine on a local box but leak information
@@ -30,7 +30,7 @@ use StackNuts\StackGauge\Model\Reporter\Concern\PlatformSectionTrait;
 class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface
 {
     use DailyCadenceTrait;
-    use PlatformSectionTrait;
+    use SecuritySectionTrait;
 
     private const SCHEMA_VERSION = '1.0';
 

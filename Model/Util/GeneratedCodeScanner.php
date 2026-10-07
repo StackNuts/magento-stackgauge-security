@@ -10,11 +10,7 @@ namespace StackNuts\StackGaugeSecurity\Model\Util;
 
 use Magento\Framework\App\Filesystem\DirectoryList;
 use Magento\Framework\Filesystem;
-use RecursiveCallbackFilterIterator;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
 use SplFileInfo;
-use Throwable;
 
 /**
  * Matches "generated_php" signatures against the PHP that Magento compiles into generated/code/
@@ -36,10 +32,14 @@ class GeneratedCodeScanner
     /**
      * @param Filesystem $filesystem
      * @param ContentSignatureScanner $scanner
+     * @param SafeFileReader $safeFileReader
+     * @param BoundedDirectoryWalker $walker
      */
     public function __construct(
         private readonly Filesystem $filesystem,
-        private readonly ContentSignatureScanner $scanner
+        private readonly ContentSignatureScanner $scanner,
+        private readonly SafeFileReader $safeFileReader,
+        private readonly BoundedDirectoryWalker $walker
     ) {
     }
 
@@ -52,37 +52,28 @@ class GeneratedCodeScanner
         $matches = [];
         $truncated = false;
 
-        try {
-            $root = $this->filesystem->getDirectoryRead(DirectoryList::ROOT)->getAbsolutePath('generated/code');
-        } catch (Throwable) {
+        $root = $this->safeFileReader->resolveAbsolutePath($this->filesystem, DirectoryList::ROOT, 'generated/code');
+        if ($root === null) {
             return ['matches' => [], 'truncated' => false];
         }
 
-        if (!is_dir($root) || is_link($root)) {
-            return ['matches' => [], 'truncated' => false];
-        }
-
-        try {
-            $filtered = new RecursiveCallbackFilterIterator(
-                new RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::UNIX_PATHS),
-                static fn (SplFileInfo $file): bool => !$file->isLink()
-            );
-            $iterator = new RecursiveIteratorIterator($filtered, RecursiveIteratorIterator::LEAVES_ONLY);
-            $iterator->setMaxDepth(self::MAX_DEPTH);
-
-            $visited = 0;
-            foreach ($iterator as $file) {
+        $visited = 0;
+        $this->walker->walk(
+            $root,
+            self::MAX_DEPTH,
+            static fn (SplFileInfo $file): bool => true,
+            function (SplFileInfo $file) use (&$matches, &$visited, &$truncated, $root, $signatures): bool {
                 if (!$file->isFile() || strtolower($file->getExtension()) !== 'php') {
-                    continue;
+                    return true;
                 }
 
                 if (++$visited > self::MAX_FILES) {
                     $truncated = true;
-                    break;
+                    return false;
                 }
 
                 if ($file->getSize() > self::MAX_FILE_BYTES) {
-                    continue;
+                    return true;
                 }
 
                 $content = (string)file_get_contents($file->getPathname());
@@ -90,10 +81,10 @@ class GeneratedCodeScanner
                 foreach ($this->scanner->scan($signatures, 'generated_php', ['generated/code/' . $relative => $content]) as $match) {
                     $matches[] = $match;
                 }
+
+                return true;
             }
-        } catch (Throwable) {
-            // Best-effort: a permission error mid-walk keeps whatever was matched before it.
-        }
+        );
 
         return ['matches' => $matches, 'truncated' => $truncated];
     }

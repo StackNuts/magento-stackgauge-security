@@ -10,8 +10,11 @@ namespace StackNuts\StackGaugeSecurity\Test\Unit\Model\Util;
 
 use Magento\Framework\Filesystem;
 use Magento\Framework\Filesystem\Directory\ReadInterface;
+use Magento\Framework\Serialize\Serializer\Json;
 use PHPUnit\Framework\TestCase;
+use StackNuts\StackGaugeSecurity\Model\Util\BoundedDirectoryWalker;
 use StackNuts\StackGaugeSecurity\Model\Util\PubExecutableScanner;
+use StackNuts\StackGaugeSecurity\Model\Util\SafeFileReader;
 
 /**
  * Exercises PubExecutableScanner against a real temporary directory tree, not mocks - its
@@ -72,7 +75,7 @@ class PubExecutableScannerTest extends TestCase
         $filesystem = $this->createStub(Filesystem::class);
         $filesystem->method('getDirectoryRead')->willReturn($pubMediaDir);
 
-        return new PubExecutableScanner($filesystem);
+        return new PubExecutableScanner($filesystem, new SafeFileReader(new Json()), new BoundedDirectoryWalker());
     }
 
     public function testDetectsAnExecutableFileDroppedInPubMedia(): void

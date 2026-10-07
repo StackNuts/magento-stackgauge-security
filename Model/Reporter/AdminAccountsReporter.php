@@ -22,7 +22,7 @@ use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
 use StackNuts\StackGauge\Model\Reporter\Concern\DailyCadenceTrait;
-use StackNuts\StackGauge\Model\Reporter\Concern\PlatformSectionTrait;
+use StackNuts\StackGauge\Model\Reporter\Concern\SecuritySectionTrait;
 use StackNuts\StackGauge\Model\Util\Clock;
 use Throwable;
 
@@ -53,7 +53,7 @@ class AdminAccountsReporter implements
     MetricCatalogInterface
 {
     use DailyCadenceTrait;
-    use PlatformSectionTrait;
+    use SecuritySectionTrait;
 
     private const SCHEMA_VERSION = '1.1';
     private const METRIC_WITHOUT_2FA = 'admin_accounts.without_2fa';
@@ -184,22 +184,22 @@ class AdminAccountsReporter implements
             'locked_accounts' => $this->field->number(
                 'Locked Accounts',
                 $lockedAccounts,
-                severity: $lockedAccounts > 0 ? Field::SEVERITY_WARNING : Field::SEVERITY_OK
+                severity: $this->field->severityIf($lockedAccounts > 0)
             ),
             'accounts_with_recent_failed_logins_24h' => $this->field->number(
                 'Accounts With Recent Failed Logins (24h)',
                 $recentFailedLogins,
-                severity: $recentFailedLogins > 0 ? Field::SEVERITY_WARNING : Field::SEVERITY_OK
+                severity: $this->field->severityIf($recentFailedLogins > 0)
             ),
             'new_admin_accounts_24h' => $this->field->number(
                 'New Admin Accounts (24h)',
                 $newAdmins,
-                severity: $newAdmins > 0 ? Field::SEVERITY_WARNING : Field::SEVERITY_OK
+                severity: $this->field->severityIf($newAdmins > 0)
             ),
             'dormant_active_accounts' => $this->field->number(
                 'Dormant Active Accounts',
                 $dormantAccounts,
-                severity: $dormantAccounts > 0 ? Field::SEVERITY_WARNING : Field::SEVERITY_OK
+                severity: $this->field->severityIf($dormantAccounts > 0)
             ),
             'all_active_admins_have_full_access' => $this->field->bool(
                 'All Active Admins Have Full Access',
@@ -217,7 +217,7 @@ class AdminAccountsReporter implements
                 $accountsWithout2fa,
                 self::METRIC_WITHOUT_2FA,
                 MetricDefinition::AGGREGATION_LATEST,
-                severity: $accountsWithout2fa > 0 ? Field::SEVERITY_WARNING : Field::SEVERITY_OK
+                severity: $this->field->severityIf($accountsWithout2fa > 0)
             ),
         ])];
     }

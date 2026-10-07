@@ -18,7 +18,7 @@ use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
 use StackNuts\StackGauge\Model\Reporter\Concern\DailyCadenceTrait;
-use StackNuts\StackGauge\Model\Reporter\Concern\PlatformSectionTrait;
+use StackNuts\StackGauge\Model\Reporter\Concern\SecuritySectionTrait;
 use StackNuts\StackGauge\Model\StorefrontProbe;
 use StackNuts\StackGaugeSecurity\Model\Util\CoreFileTamperScanner;
 use StackNuts\StackGaugeSecurity\Model\Util\FilesystemExposureScanner;
@@ -27,7 +27,7 @@ use StackNuts\StackGaugeSecurity\Model\Util\PubExecutableScanner;
 class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface
 {
     use DailyCadenceTrait;
-    use PlatformSectionTrait;
+    use SecuritySectionTrait;
 
     private const SCHEMA_VERSION = '1.0';
     private const DEFAULT_ADMIN_PATH = 'admin';
@@ -219,12 +219,10 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
      */
     private function pubExecutableFileFields(array $matches): array
     {
-        return array_map(
-            fn (array $match) => $this->field->array($match['directory'] . '/' . $match['path'], [
-                'directory' => $this->field->varchar('Directory', $match['directory']),
-                'path' => $this->field->varchar('Path', $match['path']),
-            ]),
-            $matches
+        return $this->field->varcharRows(
+            $matches,
+            static fn (array $match): string => $match['directory'] . '/' . $match['path'],
+            ['directory' => 'Directory', 'path' => 'Path']
         );
     }
 
@@ -238,13 +236,10 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
      */
     private function filesystemFindingFields(array $findings): array
     {
-        return array_map(
-            fn (array $finding) => $this->field->array($finding['name'], [
-                'location' => $this->field->varchar('Location', $finding['location']),
-                'type' => $this->field->varchar('Type', $finding['type']),
-                'name' => $this->field->varchar('Name', $finding['name']),
-            ]),
-            $findings
+        return $this->field->varcharRows(
+            $findings,
+            static fn (array $finding): string => $finding['name'],
+            ['location' => 'Location', 'type' => 'Type', 'name' => 'Name']
         );
     }
 

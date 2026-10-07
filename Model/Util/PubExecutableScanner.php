@@ -8,14 +8,9 @@ declare(strict_types=1);
 
 namespace StackNuts\StackGaugeSecurity\Model\Util;
 
-use FilesystemIterator;
 use Magento\Framework\App\Filesystem\DirectoryList;
 use Magento\Framework\Filesystem;
-use RecursiveCallbackFilterIterator;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
 use SplFileInfo;
-use Throwable;
 
 /**
  * Bounded recursive scan of pub/media and pub/static for executable-extension files that have
@@ -66,9 +61,14 @@ class PubExecutableScanner
 
     /**
      * @param Filesystem $filesystem
+     * @param SafeFileReader $safeFileReader
+     * @param BoundedDirectoryWalker $walker
      */
-    public function __construct(private readonly Filesystem $filesystem)
-    {
+    public function __construct(
+        private readonly Filesystem $filesystem,
+        private readonly SafeFileReader $safeFileReader,
+        private readonly BoundedDirectoryWalker $walker
+    ) {
     }
 
     /**
@@ -100,61 +100,39 @@ class PubExecutableScanner
      */
     private function scanDirectory(string $relativeDir): array
     {
-        try {
-            $absolutePath = rtrim(
-                $this->filesystem->getDirectoryRead(DirectoryList::ROOT)->getAbsolutePath($relativeDir),
-                '/'
-            );
-        } catch (Throwable) {
+        $absolutePath = $this->safeFileReader->resolveAbsolutePath(
+            $this->filesystem,
+            DirectoryList::ROOT,
+            $relativeDir
+        );
+        if ($absolutePath === null) {
             return [];
         }
 
-        // phpcs:ignore Magento2.Functions.DiscouragedFunction.DiscouragedWithAlternative,Magento2.Functions.DiscouragedFunction.Discouraged
-        if (!is_dir($absolutePath) || is_link($absolutePath)) {
-            return [];
-        }
-
+        $absolutePath = rtrim($absolutePath, '/');
         $matches = [];
         $visited = 0;
 
-        try {
-            $flags = FilesystemIterator::SKIP_DOTS | FilesystemIterator::UNIX_PATHS;
-            $filtered = new RecursiveCallbackFilterIterator(
-                new RecursiveDirectoryIterator($absolutePath, $flags),
-                static function (SplFileInfo $file): bool {
-                    // Never descend into (or even report on) a symlink - dev-mode setups
-                    // commonly symlink pub/static back into theme source trees, and following
-                    // that would turn this into an unbounded full-codebase scan. Omitting
-                    // FilesystemIterator::FOLLOW_SYMLINKS above already stops a symlinked
-                    // *directory* from being recursed into; this is the explicit, belt-and
-                    // -braces version covering symlinked files too.
-                    if ($file->isLink()) {
-                        return false;
-                    }
-
-                    return !$file->isDir() || !in_array(
-                        strtolower($file->getFilename()),
-                        self::PRUNED_DIRECTORY_NAMES,
-                        true
-                    );
-                }
-            );
-
-            $iterator = new RecursiveIteratorIterator($filtered, RecursiveIteratorIterator::SELF_FIRST);
-            $iterator->setMaxDepth(self::MAX_DEPTH);
-
-            foreach ($iterator as $file) {
+        $this->walker->walk(
+            $absolutePath,
+            self::MAX_DEPTH,
+            static fn (SplFileInfo $file): bool => !$file->isDir() || !in_array(
+                strtolower($file->getFilename()),
+                self::PRUNED_DIRECTORY_NAMES,
+                true
+            ),
+            function (SplFileInfo $file) use (&$matches, &$visited, $relativeDir, $absolutePath): bool {
                 $visited++;
                 if ($visited > self::MAX_INODES_VISITED_PER_DIRECTORY) {
-                    break;
+                    return false;
                 }
 
                 if (!$file->isFile()) {
-                    continue;
+                    return true;
                 }
 
                 if (!in_array(strtolower($file->getExtension()), self::EXECUTABLE_EXTENSIONS, true)) {
-                    continue;
+                    return true;
                 }
 
                 $matches[] = [
@@ -162,15 +140,9 @@ class PubExecutableScanner
                     'path' => ltrim(substr($file->getPathname(), strlen($absolutePath)), '/'),
                 ];
 
-                if (count($matches) >= self::MAX_MATCHES) {
-                    break;
-                }
+                return count($matches) < self::MAX_MATCHES;
             }
-        // phpcs:ignore Magento2.CodeAnalysis.EmptyBlock.DetectedCatch
-        } catch (Throwable) {
-            // Best-effort - a permission error or similar mid-walk must not fail this reporter
-            // or the whole report; whatever was found before the error still counts.
-        }
+        );
 
         return $matches;
     }

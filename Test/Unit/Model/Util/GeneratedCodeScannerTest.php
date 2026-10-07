@@ -10,9 +10,12 @@ namespace StackNuts\StackGaugeSecurity\Test\Unit\Model\Util;
 
 use Magento\Framework\Filesystem;
 use Magento\Framework\Filesystem\Directory\ReadInterface;
+use Magento\Framework\Serialize\Serializer\Json;
 use PHPUnit\Framework\TestCase;
+use StackNuts\StackGaugeSecurity\Model\Util\BoundedDirectoryWalker;
 use StackNuts\StackGaugeSecurity\Model\Util\ContentSignatureScanner;
 use StackNuts\StackGaugeSecurity\Model\Util\GeneratedCodeScanner;
+use StackNuts\StackGaugeSecurity\Model\Util\SafeFileReader;
 
 class GeneratedCodeScannerTest extends TestCase
 {
@@ -50,7 +53,12 @@ class GeneratedCodeScannerTest extends TestCase
         $filesystem = $this->createStub(Filesystem::class);
         $filesystem->method('getDirectoryRead')->willReturn($read);
 
-        return new GeneratedCodeScanner($filesystem, new ContentSignatureScanner());
+        return new GeneratedCodeScanner(
+            $filesystem,
+            new ContentSignatureScanner(),
+            new SafeFileReader(new Json()),
+            new BoundedDirectoryWalker()
+        );
     }
 
     private function signature(): array

@@ -11,7 +11,6 @@ namespace StackNuts\StackGaugeSecurity\Model\Util;
 use Magento\Framework\App\Filesystem\DirectoryList;
 use Magento\Framework\Filesystem;
 use Magento\Framework\Module\Dir;
-use Magento\Framework\Serialize\Serializer\Json;
 use Throwable;
 
 /**
@@ -32,13 +31,13 @@ class SignatureStore
     /**
      * @param Filesystem $filesystem
      * @param Dir $moduleDir
-     * @param Json $json
+     * @param SafeFileReader $safeFileReader
      * @param SignatureSetValidator $validator
      */
     public function __construct(
         private readonly Filesystem $filesystem,
         private readonly Dir $moduleDir,
-        private readonly Json $json,
+        private readonly SafeFileReader $safeFileReader,
         private readonly SignatureSetValidator $validator
     ) {
     }
@@ -81,18 +80,9 @@ class SignatureStore
      */
     private function readCache(): ?array
     {
-        try {
-            $var = $this->filesystem->getDirectoryRead(DirectoryList::VAR_DIR);
-            if (!$var->isExist(self::CACHE_PATH)) {
-                return null;
-            }
+        $var = $this->safeFileReader->getDirectoryRead($this->filesystem, DirectoryList::VAR_DIR);
 
-            $decoded = $this->json->unserialize($var->readFile(self::CACHE_PATH));
-
-            return is_array($decoded) ? $decoded : null;
-        } catch (Throwable) {
-            return null;
-        }
+        return $var !== null ? $this->safeFileReader->readJson($var, self::CACHE_PATH) : null;
     }
 
     /**
@@ -104,17 +94,11 @@ class SignatureStore
             $etcDir = $this->filesystem->getDirectoryReadByPath(
                 $this->moduleDir->getDir(self::MODULE_NAME, Dir::MODULE_ETC_DIR)
             );
-
-            if (!$etcDir->isExist(self::SIGNATURES_FILE)) {
-                return null;
-            }
-
-            $decoded = $this->json->unserialize($etcDir->readFile(self::SIGNATURES_FILE));
-
-            return is_array($decoded) ? $decoded : null;
         } catch (Throwable) {
             return null;
         }
+
+        return $this->safeFileReader->readJson($etcDir, self::SIGNATURES_FILE);
     }
 
     /**

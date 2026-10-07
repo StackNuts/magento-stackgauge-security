@@ -30,9 +30,12 @@ class PubFileContentReader
 
     /**
      * @param Filesystem $filesystem
+     * @param SafeFileReader $safeFileReader
      */
-    public function __construct(private readonly Filesystem $filesystem)
-    {
+    public function __construct(
+        private readonly Filesystem $filesystem,
+        private readonly SafeFileReader $safeFileReader
+    ) {
     }
 
     /**
@@ -43,9 +46,8 @@ class PubFileContentReader
      */
     public function readContents(array $matches): array
     {
-        try {
-            $root = $this->filesystem->getDirectoryRead(DirectoryList::ROOT);
-        } catch (Throwable) {
+        $root = $this->safeFileReader->getDirectoryRead($this->filesystem, DirectoryList::ROOT);
+        if ($root === null) {
             return [];
         }
 

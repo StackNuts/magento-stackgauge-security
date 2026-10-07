@@ -13,6 +13,7 @@ use Magento\Framework\Filesystem\Directory\ReadInterface;
 use Magento\Framework\Module\Dir;
 use Magento\Framework\Serialize\Serializer\Json;
 use PHPUnit\Framework\TestCase;
+use StackNuts\StackGaugeSecurity\Model\Util\SafeFileReader;
 use StackNuts\StackGaugeSecurity\Model\Util\SignatureSetValidator;
 use StackNuts\StackGaugeSecurity\Model\Util\SignatureStore;
 
@@ -54,7 +55,7 @@ class SignatureStoreTest extends TestCase
         $moduleDir = $this->createStub(Dir::class);
         $moduleDir->method('getDir')->willReturn('/app/code/StackNuts/StackGaugeSecurity/etc');
 
-        return new SignatureStore($filesystem, $moduleDir, new Json(), new SignatureSetValidator());
+        return new SignatureStore($filesystem, $moduleDir, new SafeFileReader(new Json()), new SignatureSetValidator());
     }
 
     public function testPrefersAValidCachedFeedOverTheBundledSet(): void

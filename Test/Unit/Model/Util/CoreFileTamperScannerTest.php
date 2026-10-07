@@ -10,8 +10,11 @@ namespace StackNuts\StackGaugeSecurity\Test\Unit\Model\Util;
 
 use Magento\Framework\Filesystem;
 use Magento\Framework\Filesystem\Directory\ReadInterface;
+use Magento\Framework\Serialize\Serializer\Json;
 use PHPUnit\Framework\TestCase;
+use StackNuts\StackGaugeSecurity\Model\Util\BoundedDirectoryWalker;
 use StackNuts\StackGaugeSecurity\Model\Util\CoreFileTamperScanner;
+use StackNuts\StackGaugeSecurity\Model\Util\SafeFileReader;
 
 /**
  * Exercises CoreFileTamperScanner against a real temporary vendor/-shaped directory tree, not
@@ -86,7 +89,7 @@ class CoreFileTamperScannerTest extends TestCase
         $filesystem = $this->createStub(Filesystem::class);
         $filesystem->method('getDirectoryRead')->willReturn($rootDir);
 
-        return new CoreFileTamperScanner($filesystem);
+        return new CoreFileTamperScanner($filesystem, new SafeFileReader(new Json()), new BoundedDirectoryWalker());
     }
 
     public function testFlagsAFileThatDriftsFarNewerThanItsPackageSiblings(): void
