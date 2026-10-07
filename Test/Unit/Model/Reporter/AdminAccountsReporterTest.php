@@ -307,8 +307,38 @@ class AdminAccountsReporterTest extends TestCase
 
         $metrics = $reporter->getTrackableMetrics();
 
-        $this->assertCount(1, $metrics);
         $this->assertSame('admin_accounts.without_2fa', $metrics[0]->getMetricKey());
         $this->assertSame('latest', $metrics[0]->getAggregation());
+    }
+
+    public function testDeclaresTheTripwireTrackableMetrics(): void
+    {
+        $factory = $this->createMock(AdminUserCollectionFactory::class);
+        $moduleList = $this->createMock(ModuleListInterface::class);
+        $objectManager = $this->createMock(ObjectManagerInterface::class);
+
+        $reporter = new AdminAccountsReporter(
+            $factory,
+            $moduleList,
+            $objectManager,
+            $this->resourceConnectionWithNoRoleData(),
+            new Clock(),
+            new Field(),
+            new Section()
+        );
+
+        $metrics = $reporter->getTrackableMetrics();
+        $byKey = [];
+        foreach ($metrics as $metric) {
+            $byKey[$metric->getMetricKey()] = $metric;
+        }
+
+        $this->assertCount(4, $metrics);
+        $this->assertArrayHasKey('admin_accounts.recent_failed_logins_24h', $byKey);
+        $this->assertSame(2, $byKey['admin_accounts.recent_failed_logins_24h']->getDefaultThreshold());
+        $this->assertArrayHasKey('admin_accounts.new_admins_24h', $byKey);
+        $this->assertSame(0, $byKey['admin_accounts.new_admins_24h']->getDefaultThreshold());
+        $this->assertArrayHasKey('admin_accounts.dormant_accounts', $byKey);
+        $this->assertSame(3, $byKey['admin_accounts.dormant_accounts']->getDefaultThreshold());
     }
 }

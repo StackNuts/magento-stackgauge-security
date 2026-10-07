@@ -55,8 +55,11 @@ class AdminAccountsReporter implements
     use DailyCadenceTrait;
     use SecuritySectionTrait;
 
-    private const SCHEMA_VERSION = '1.1';
+    private const SCHEMA_VERSION = '1.2';
     private const METRIC_WITHOUT_2FA = 'admin_accounts.without_2fa';
+    private const METRIC_RECENT_FAILED_LOGINS = 'admin_accounts.recent_failed_logins_24h';
+    private const METRIC_NEW_ADMINS = 'admin_accounts.new_admins_24h';
+    private const METRIC_DORMANT_ACCOUNTS = 'admin_accounts.dormant_accounts';
 
     /**
      * A known dev-convenience module that neuters 2FA enforcement regardless of
@@ -186,19 +189,25 @@ class AdminAccountsReporter implements
                 $lockedAccounts,
                 severity: $this->field->severityIf($lockedAccounts > 0)
             ),
-            'accounts_with_recent_failed_logins_24h' => $this->field->number(
+            'accounts_with_recent_failed_logins_24h' => $this->field->trackableNumber(
                 'Accounts With Recent Failed Logins (24h)',
                 $recentFailedLogins,
+                self::METRIC_RECENT_FAILED_LOGINS,
+                MetricDefinition::AGGREGATION_LATEST,
                 severity: $this->field->severityIf($recentFailedLogins > 0)
             ),
-            'new_admin_accounts_24h' => $this->field->number(
+            'new_admin_accounts_24h' => $this->field->trackableNumber(
                 'New Admin Accounts (24h)',
                 $newAdmins,
+                self::METRIC_NEW_ADMINS,
+                MetricDefinition::AGGREGATION_LATEST,
                 severity: $this->field->severityIf($newAdmins > 0)
             ),
-            'dormant_active_accounts' => $this->field->number(
+            'dormant_active_accounts' => $this->field->trackableNumber(
                 'Dormant Active Accounts',
                 $dormantAccounts,
+                self::METRIC_DORMANT_ACCOUNTS,
+                MetricDefinition::AGGREGATION_LATEST,
                 severity: $this->field->severityIf($dormantAccounts > 0)
             ),
             'all_active_admins_have_full_access' => $this->field->bool(
@@ -223,9 +232,10 @@ class AdminAccountsReporter implements
     }
 
     /**
-     * Alertable metric for the admin-accounts reporter: active admins who haven't completed
-     * 2FA enrollment, including every account when 2FA is off entirely (see getStatus()'s own
-     * comment on that choice).
+     * Alertable metrics for the admin-accounts reporter: active admins who haven't completed
+     * 2FA enrollment (including every account when 2FA is off entirely - see getStatus()'s own
+     * comment on that choice), plus three tripwires over the same 24h window getStatus() reads
+     * from (failed logins, new admins, dormant accounts).
      */
     public function getTrackableMetrics(): array
     {
@@ -243,6 +253,47 @@ class AdminAccountsReporter implements
                 null,
                 description: '{value} admin accounts have no two-factor authentication, above the limit of {threshold}.',
                 impact: 'Accounts without a second factor are an easier route to a takeover.'
+            ),
+            // Threshold 2 (fires at 3+), not 0 - a single mistyped password is routine noise,
+            // several accounts mid-failure-streak at once is the actual brute-force signal.
+            new MetricDefinition(
+                self::METRIC_RECENT_FAILED_LOGINS,
+                'Admin Accounts: Recent Failed Logins (24h)',
+                MetricDefinition::AGGREGATION_LATEST,
+                MetricDefinition::OPERATOR_GT,
+                2,
+                1500,
+                null,
+                description: '{value} admin accounts have a recent failed-login streak, above the limit of {threshold}, in the last 24h.',
+                impact: 'A cluster of failed logins can mean a brute-force attempt against the admin panel.'
+            ),
+            // Threshold 0 - deliberately the most sensitive metric here. Legitimate admin
+            // creation is rare enough that one false positive is worth it to catch a backdoor
+            // account created by an attacker (see this class's own docblock).
+            new MetricDefinition(
+                self::METRIC_NEW_ADMINS,
+                'Admin Accounts: New Admins (24h)',
+                MetricDefinition::AGGREGATION_LATEST,
+                MetricDefinition::OPERATOR_GT,
+                0,
+                1500,
+                null,
+                description: '{value} new admin accounts were created in the last 24h, above the limit of {threshold}.',
+                impact: 'An admin account nobody recognizes creating itself is a common sign of a compromise.'
+            ),
+            // Threshold 3, not 0 - a handful of dormant active accounts is normal churn (an
+            // ex-employee not yet offboarded, a rarely-used integration account); this is a
+            // slower hygiene signal, not an active-attack tripwire like the two above.
+            new MetricDefinition(
+                self::METRIC_DORMANT_ACCOUNTS,
+                'Admin Accounts: Dormant Active Accounts',
+                MetricDefinition::AGGREGATION_LATEST,
+                MetricDefinition::OPERATOR_GT,
+                3,
+                1500,
+                null,
+                description: '{value} active admin accounts have never logged in, above the limit of {threshold}.',
+                impact: 'An active account nobody uses is unnecessary attack surface and should be disabled.'
             ),
         ];
     }
