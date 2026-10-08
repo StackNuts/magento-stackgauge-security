@@ -37,12 +37,17 @@ class SignatureStoreTest extends TestCase
     /**
      * @param string|null $cache Contents of the var/ cache file, or null for "absent".
      * @param string|null $bundled Contents of the bundled etc/signatures.json, or null for "absent".
+     * @param string|null $feedStatus Contents of the var/ feed-status file, or null for "absent".
      */
-    private function store(?string $cache, ?string $bundled): SignatureStore
+    private function store(?string $cache, ?string $bundled, ?string $feedStatus = null): SignatureStore
     {
         $varDir = $this->createStub(ReadInterface::class);
-        $varDir->method('isExist')->willReturn($cache !== null);
-        $varDir->method('readFile')->willReturn($cache ?? '');
+        $varDir->method('isExist')->willReturnCallback(
+            static fn (string $path): bool => str_ends_with($path, 'feed_status.json') ? $feedStatus !== null : $cache !== null
+        );
+        $varDir->method('readFile')->willReturnCallback(
+            static fn (string $path): string => str_ends_with($path, 'feed_status.json') ? ($feedStatus ?? '') : ($cache ?? '')
+        );
 
         $etcDir = $this->createStub(ReadInterface::class);
         $etcDir->method('isExist')->willReturn($bundled !== null);
@@ -97,5 +102,52 @@ class SignatureStoreTest extends TestCase
 
         $this->assertSame([], $store->getSignatures());
         $this->assertNull($store->getVersion());
+    }
+
+    public function testReportsFeedAsTheSourceWhenTheCacheIsActive(): void
+    {
+        $store = $this->store($this->set('2026.11.0', 'from-cache'), $this->set('2026.10.0', 'bundled'));
+
+        $this->assertSame(SignatureStore::SOURCE_FEED, $store->getSource());
+    }
+
+    public function testReportsBundledAsTheSourceWhenFallenBack(): void
+    {
+        $store = $this->store(null, $this->set('2026.10.0', 'bundled'));
+
+        $this->assertSame(SignatureStore::SOURCE_BUNDLED, $store->getSource());
+    }
+
+    public function testReportsNoneAsTheSourceWhenNeitherIsUsable(): void
+    {
+        $store = $this->store(null, null);
+
+        $this->assertSame(SignatureStore::SOURCE_NONE, $store->getSource());
+    }
+
+    public function testReturnsNullLastFeedFetchWhenTheFeedHasNeverBeenFetched(): void
+    {
+        $store = $this->store(null, $this->set('2026.10.0', 'bundled'), feedStatus: null);
+
+        $this->assertNull($store->getLastFeedFetch());
+    }
+
+    public function testReturnsTheLastFeedFetchStatus(): void
+    {
+        $status = json_encode([
+            'attempted_at' => '2026-10-08T14:00:00Z',
+            'status' => 'failure',
+            'message' => 'signature feed checksum mismatch',
+            'ref' => 'main',
+        ]);
+
+        $store = $this->store(null, $this->set('2026.10.0', 'bundled'), feedStatus: $status);
+
+        $this->assertSame([
+            'attempted_at' => '2026-10-08T14:00:00Z',
+            'status' => 'failure',
+            'message' => 'signature feed checksum mismatch',
+            'ref' => 'main',
+        ], $store->getLastFeedFetch());
     }
 }

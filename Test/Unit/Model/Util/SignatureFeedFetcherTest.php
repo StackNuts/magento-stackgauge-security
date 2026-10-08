@@ -56,17 +56,39 @@ class SignatureFeedFetcherTest extends TestCase
         );
     }
 
-    private function writeMock(): WriteInterface
+    /**
+     * @return array{0: WriteInterface, 1: object{written: list<string>, contents: array<string, string>}}
+     */
+    private function recordingWrite(): array
     {
-        return $this->createMock(WriteInterface::class);
+        $recorder = new \stdClass();
+        $recorder->written = [];
+        $recorder->contents = [];
+
+        $write = $this->createStub(WriteInterface::class);
+        $write->method('create')->willReturn(true);
+        $write->method('writeFile')->willReturnCallback(
+            function (string $path, string $content) use ($recorder): int {
+                $recorder->written[] = $path;
+                $recorder->contents[$path] = $content;
+                return strlen($content);
+            }
+        );
+        $write->method('renameFile')->willReturnCallback(
+            function (string $from, string $to) use ($recorder): bool {
+                $recorder->written[] = $to;
+                $recorder->contents[$to] = $recorder->contents[$from] ?? null;
+                return true;
+            }
+        );
+
+        return [$write, $recorder];
     }
 
     public function testCachesTheFeedWhenChecksumAndValidationPass(): void
     {
         $checksum = hash('sha256', self::VALID_FEED) . "  signatures.json\n";
-        $write = $this->writeMock();
-        $write->expects($this->once())->method('writeFile');
-        $write->expects($this->once())->method('renameFile');
+        [$write, $recorder] = $this->recordingWrite();
 
         $fetcher = $this->fetcher([
             'signatures.json' => [200, self::VALID_FEED],
@@ -74,12 +96,16 @@ class SignatureFeedFetcherTest extends TestCase
         ], $write);
 
         $this->assertTrue($fetcher->refresh());
+        $this->assertContains('stacknuts_stackgaugesecurity/signatures.json', $recorder->written);
+
+        $status = json_decode($recorder->contents['stacknuts_stackgaugesecurity/feed_status.json'], true);
+        $this->assertSame('success', $status['status']);
+        $this->assertNull($status['message']);
     }
 
     public function testKeepsTheCacheWhenTheChecksumDoesNotMatch(): void
     {
-        $write = $this->writeMock();
-        $write->expects($this->never())->method('writeFile');
+        [$write, $recorder] = $this->recordingWrite();
 
         $fetcher = $this->fetcher([
             'signatures.json' => [200, self::VALID_FEED],
@@ -87,22 +113,30 @@ class SignatureFeedFetcherTest extends TestCase
         ], $write);
 
         $this->assertFalse($fetcher->refresh());
+        $this->assertNotContains('stacknuts_stackgaugesecurity/signatures.json', $recorder->written);
+
+        $status = json_decode($recorder->contents['stacknuts_stackgaugesecurity/feed_status.json'], true);
+        $this->assertSame('failure', $status['status']);
+        $this->assertSame('signature feed checksum mismatch', $status['message']);
     }
 
     public function testKeepsTheCacheWhenTheFeedCannotBeDownloaded(): void
     {
-        $write = $this->writeMock();
-        $write->expects($this->never())->method('writeFile');
+        [$write, $recorder] = $this->recordingWrite();
 
         $fetcher = $this->fetcher(['signatures.json' => [404, '']], $write);
 
         $this->assertFalse($fetcher->refresh());
+        $this->assertNotContains('stacknuts_stackgaugesecurity/signatures.json', $recorder->written);
+
+        $status = json_decode($recorder->contents['stacknuts_stackgaugesecurity/feed_status.json'], true);
+        $this->assertSame('failure', $status['status']);
+        $this->assertSame('signature feed download failed', $status['message']);
     }
 
     public function testKeepsTheCacheWhenTheChecksumFileIsMalformed(): void
     {
-        $write = $this->writeMock();
-        $write->expects($this->never())->method('writeFile');
+        [$write, $recorder] = $this->recordingWrite();
 
         $fetcher = $this->fetcher([
             'signatures.json' => [200, self::VALID_FEED],
@@ -110,6 +144,7 @@ class SignatureFeedFetcherTest extends TestCase
         ], $write);
 
         $this->assertFalse($fetcher->refresh());
+        $this->assertNotContains('stacknuts_stackgaugesecurity/signatures.json', $recorder->written);
     }
 
     public function testKeepsTheCacheWhenTheFeedFailsValidationEvenWithAMatchingChecksum(): void
@@ -118,8 +153,7 @@ class SignatureFeedFetcherTest extends TestCase
             . '"pattern_type":"literal","pattern":"x"}]}';
         $checksum = hash('sha256', $invalidFeed) . "  signatures.json\n";
 
-        $write = $this->writeMock();
-        $write->expects($this->never())->method('writeFile');
+        [$write, $recorder] = $this->recordingWrite();
 
         $fetcher = $this->fetcher([
             'signatures.json' => [200, $invalidFeed],
@@ -127,5 +161,10 @@ class SignatureFeedFetcherTest extends TestCase
         ], $write);
 
         $this->assertFalse($fetcher->refresh());
+        $this->assertNotContains('stacknuts_stackgaugesecurity/signatures.json', $recorder->written);
+
+        $status = json_decode($recorder->contents['stacknuts_stackgaugesecurity/feed_status.json'], true);
+        $this->assertSame('failure', $status['status']);
+        $this->assertSame('signature feed failed validation', $status['message']);
     }
 }

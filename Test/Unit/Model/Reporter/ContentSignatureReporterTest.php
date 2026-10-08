@@ -42,11 +42,15 @@ class ContentSignatureReporterTest extends TestCase
         array $matches = [],
         string $version = '2026.10.0',
         int $signatureCount = 7,
-        bool $cmsTruncated = false
+        bool $cmsTruncated = false,
+        string $source = SignatureStore::SOURCE_BUNDLED,
+        ?array $lastFeedFetch = null
     ): ContentSignatureReporter {
         $signatureStore = $this->createStub(SignatureStore::class);
         $signatureStore->method('getVersion')->willReturn($version);
         $signatureStore->method('getSignatures')->willReturn(array_fill(0, $signatureCount, []));
+        $signatureStore->method('getSource')->willReturn($source);
+        $signatureStore->method('getLastFeedFetch')->willReturn($lastFeedFetch);
 
         $scanner = $this->createStub(ContentSignatureScanner::class);
         $scanner->method('scan')->willReturnCallback(
@@ -157,6 +161,58 @@ class ContentSignatureReporterTest extends TestCase
         $fields = $status['general']->getFields();
 
         $this->assertTrue($fields['content_scan_truncated']->getValue());
+    }
+
+    public function testGetStatusReportsTheSignatureSourceAsFetchedFeed(): void
+    {
+        $status = $this->reporter(source: SignatureStore::SOURCE_FEED)->getStatus();
+        $fields = $status['general']->getFields();
+
+        $this->assertSame('Fetched Feed', $fields['signature_source']->getValue());
+    }
+
+    public function testGetStatusReportsTheSignatureSourceAsBundledFallback(): void
+    {
+        $status = $this->reporter(source: SignatureStore::SOURCE_BUNDLED)->getStatus();
+        $fields = $status['general']->getFields();
+
+        $this->assertSame('Bundled Fallback', $fields['signature_source']->getValue());
+    }
+
+    public function testGetStatusReportsNoUsableSignatureSourceAsCritical(): void
+    {
+        $status = $this->reporter(source: SignatureStore::SOURCE_NONE)->getStatus();
+        $fields = $status['general']->getFields();
+
+        $this->assertSame('None', $fields['signature_source']->getValue());
+        $this->assertSame(['None'], $fields['signature_source']->jsonSerialize()['critical_values']);
+    }
+
+    public function testGetStatusReportsNeverFetchedWhenNoFetchHasRun(): void
+    {
+        $status = $this->reporter(lastFeedFetch: null)->getStatus();
+        $fields = $status['general']->getFields();
+
+        $this->assertSame('never', $fields['last_feed_fetch_at']->getValue());
+        $this->assertSame('never run', $fields['last_feed_fetch_status']->getValue());
+    }
+
+    public function testGetStatusReportsTheLastFeedFetchAttempt(): void
+    {
+        $lastFeedFetch = [
+            'attempted_at' => '2026-10-08T14:00:00Z',
+            'status' => 'failure',
+            'message' => 'signature feed checksum mismatch',
+            'ref' => 'main',
+        ];
+
+        $status = $this->reporter(lastFeedFetch: $lastFeedFetch)->getStatus();
+        $fields = $status['general']->getFields();
+
+        $this->assertSame('2026-10-08T14:00:00Z', $fields['last_feed_fetch_at']->getValue());
+        $this->assertSame('failure', $fields['last_feed_fetch_status']->getValue());
+        $this->assertSame(['failure'], $fields['last_feed_fetch_status']->jsonSerialize()['critical_values']);
+        $this->assertSame('signature feed checksum mismatch', $fields['last_feed_fetch_message']->getValue());
     }
 
     public function testCriticalMatchesIsAnAlertableMetricWithZeroThreshold(): void

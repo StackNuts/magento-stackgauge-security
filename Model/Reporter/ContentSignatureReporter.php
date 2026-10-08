@@ -129,6 +129,7 @@ class ContentSignatureReporter implements
             $matches,
             static fn (array $match): bool => $match['severity'] === Field::SEVERITY_CRITICAL
         ));
+        $lastFeedFetch = $this->signatureStore->getLastFeedFetch();
 
         return [
             'general' => $this->section->facts('general', 'General', '', [
@@ -137,6 +138,24 @@ class ContentSignatureReporter implements
                     $this->signatureStore->getVersion() ?? 'unknown'
                 ),
                 'signature_count' => $this->field->number('Signatures Loaded', count($signatures)),
+                'signature_source' => $this->field->varchar(
+                    'Signature Source',
+                    $this->sourceLabel($this->signatureStore->getSource()),
+                    criticalValues: ['None']
+                ),
+                'last_feed_fetch_at' => $this->field->varchar(
+                    'Last Feed Fetch Attempt',
+                    $lastFeedFetch['attempted_at'] ?? 'never'
+                ),
+                'last_feed_fetch_status' => $this->field->varchar(
+                    'Last Feed Fetch Status',
+                    $lastFeedFetch['status'] ?? 'never run',
+                    criticalValues: ['failure']
+                ),
+                'last_feed_fetch_message' => $this->field->varchar(
+                    'Last Feed Fetch Message',
+                    $lastFeedFetch['message'] ?? ''
+                ),
                 'matches_detected' => $this->field->bool(
                     'Content Signature Matches Detected',
                     $matches !== [],
@@ -193,6 +212,20 @@ class ContentSignatureReporter implements
                 impact: 'A known webshell or payment-skimmer pattern was found on this store. Investigate immediately.'
             ),
         ];
+    }
+
+    /**
+     * Human label for SignatureStore::getSource()'s machine value - "None" (the only one flagged
+     * critical_when) means neither a fetched feed nor the bundled fallback validated, so the
+     * scanner above ran against zero signatures.
+     */
+    private function sourceLabel(string $source): string
+    {
+        return match ($source) {
+            SignatureStore::SOURCE_FEED => 'Fetched Feed',
+            SignatureStore::SOURCE_BUNDLED => 'Bundled Fallback',
+            default => 'None',
+        };
     }
 
     /**

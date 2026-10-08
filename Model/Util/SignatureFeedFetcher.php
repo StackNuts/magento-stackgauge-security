@@ -22,6 +22,10 @@ use Throwable;
  * SignatureSetValidator. Anything else leaves the previous good cache in place - a bad fetch
  * never degrades detection below what was already working.
  *
+ * Every attempt - success or failure - is recorded to a small status file under var/ (read back by
+ * SignatureStore::getLastFeedFetch()) so the dashboard can show when the feed was last checked and
+ * why it isn't using a freshly fetched set, rather than that being visible only in the PHP log.
+ *
  * FEED_REF is the git ref the feed is read from. It points at main for now so the feed can be
  * exercised before a first tagged release exists; once tags are being published it should be
  * changed to a pinned release tag, so a bad commit on main can't reach client stores before it's
@@ -33,6 +37,7 @@ class SignatureFeedFetcher
     private const FEED_BASE_URL = 'https://raw.githubusercontent.com/StackNuts/magento-stackgauge-signatures/';
     private const FEED_FILE = 'signatures.json';
     private const CHECKSUM_FILE = 'signatures.json.sha256';
+    private const STATUS_FILE = 'feed_status.json';
     private const CONNECT_TIMEOUT_SECONDS = 5;
     private const TOTAL_TIMEOUT_SECONDS = 10;
     private const CACHE_DIR = 'stacknuts_stackgaugesecurity';
@@ -64,27 +69,48 @@ class SignatureFeedFetcher
             $expectedHash = $this->parseChecksum($this->download(self::CHECKSUM_FILE));
 
             if ($body === null || $expectedHash === null) {
-                $this->logger->warning('StackGaugeSecurity: signature feed download failed; keeping cached set.');
-                return false;
+                return $this->fail(
+                    'signature feed download failed; keeping cached set.',
+                    'signature feed download failed'
+                );
             }
 
             if (!hash_equals($expectedHash, hash('sha256', $body))) {
-                $this->logger->warning('StackGaugeSecurity: signature feed checksum mismatch; keeping cached set.');
-                return false;
+                return $this->fail(
+                    'signature feed checksum mismatch; keeping cached set.',
+                    'signature feed checksum mismatch'
+                );
             }
 
             $decoded = $this->json->unserialize($body);
             if (!is_array($decoded) || !$this->validator->isValid($decoded)) {
-                $this->logger->warning('StackGaugeSecurity: signature feed failed validation; keeping cached set.');
-                return false;
+                return $this->fail(
+                    'signature feed failed validation; keeping cached set.',
+                    'signature feed failed validation'
+                );
             }
 
             $this->writeCache($body);
+            $this->recordStatus(true, null);
             return true;
         } catch (Throwable $e) {
-            $this->logger->warning('StackGaugeSecurity: signature feed refresh failed: ' . $e->getMessage());
-            return false;
+            return $this->fail(
+                'signature feed refresh failed: ' . $e->getMessage(),
+                'signature feed refresh failed: ' . $e->getMessage()
+            );
         }
+    }
+
+    /**
+     * Logs $logMessage, records $statusMessage as this attempt's failure reason, and returns
+     * false - the shared tail of every failure branch in refresh().
+     */
+    private function fail(string $logMessage, string $statusMessage): bool
+    {
+        $this->logger->warning('StackGaugeSecurity: ' . $logMessage);
+        $this->recordStatus(false, $statusMessage);
+
+        return false;
     }
 
     private function download(string $file): ?string
@@ -121,5 +147,31 @@ class SignatureFeedFetcher
         $tmp = self::CACHE_DIR . '/' . self::FEED_FILE . '.tmp';
         $var->writeFile($tmp, $body);
         $var->renameFile($tmp, self::CACHE_DIR . '/' . self::FEED_FILE);
+    }
+
+    /**
+     * Records this attempt's outcome so SignatureStore::getLastFeedFetch() can surface it - best
+     * effort only, since a failure to record the status must never be mistaken for a failure to
+     * refresh the feed itself.
+     */
+    private function recordStatus(bool $success, ?string $message): void
+    {
+        try {
+            $payload = $this->json->serialize([
+                'attempted_at' => gmdate('Y-m-d\TH:i:s\Z'),
+                'status' => $success ? 'success' : 'failure',
+                'message' => $message,
+                'ref' => self::FEED_REF,
+            ]);
+
+            $var = $this->filesystem->getDirectoryWrite(DirectoryList::VAR_DIR);
+            $var->create(self::CACHE_DIR);
+
+            $tmp = self::CACHE_DIR . '/' . self::STATUS_FILE . '.tmp';
+            $var->writeFile($tmp, $payload);
+            $var->renameFile($tmp, self::CACHE_DIR . '/' . self::STATUS_FILE);
+        } catch (Throwable) {
+            // Best-effort only - see docblock.
+        }
     }
 }
