@@ -1,0 +1,20 @@
+<?php
+/**
+ * Copyright © StackNuts. All rights reserved.
+ * See LICENSE for license details.
+ */
+/** @var \StackNuts\StackGaugeSecurity\Block\Adminhtml\System\Config\FetchSignatures $block */
+/** @var \Magento\Framework\Escaper $escaper */
+?>
+<button class="scalable" type="button" id="<?= $escaper->escapeHtmlAttr($block->getHtmlId()) ?>"
+        data-mage-init='{"StackNuts_StackGaugeSecurity/js/fetch-signatures": {
+            "url": "<?= $escaper->escapeUrl($block->getAjaxUrl()) ?>",
+            "elementId": "<?= $escaper->escapeHtmlAttr($block->getHtmlId()) ?>"
+        }}'>
+    <?= $escaper->escapeHtml(__('Fetch Latest Signatures Now')) ?>
+</button>
+<p class="note">
+    <span id="<?= $escaper->escapeHtmlAttr($block->getHtmlId()) ?>_result">
+        <?= $escaper->escapeHtml($block->getStatusText()) ?>
+    </span>
+</p>

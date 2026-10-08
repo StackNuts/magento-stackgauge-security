@@ -9,6 +9,13 @@
                     <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
                 </field>
             </group>
+            <group id="signatures" translate="label" type="text" sortOrder="15" showInDefault="1" showInWebsite="0" showInStore="0">
+                <label>Content Signatures</label>
+                <field id="fetch_signatures" translate="label" sortOrder="10" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Fetch Latest Signatures Now</label>
+                    <frontend_model>StackNuts\StackGaugeSecurity\Block\Adminhtml\System\Config\FetchSignatures</frontend_model>
+                </field>
+            </group>
         </section>
     </system>
 </config>
