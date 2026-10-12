@@ -10,6 +10,7 @@ namespace StackNuts\StackGaugeSecurity\Model\Reporter;
 
 use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\ArrayField;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\MetricCatalogInterface;
@@ -42,7 +43,8 @@ class ContentSignatureReporter implements
     ReporterInterface,
     DeclaresCadenceInterface,
     DeclaresSectionInterface,
-    MetricCatalogInterface
+    MetricCatalogInterface,
+    DeclaresSlotInterface
 {
     use DailyCadenceTrait;
     use SecuritySectionTrait;
@@ -278,5 +280,13 @@ class ContentSignatureReporter implements
             ]),
             $matches
         );
+    }
+
+    /**
+     * Run 1 within this reporter's cadence tier.
+     */
+    public function getSlot(): int
+    {
+        return 1;
     }
 }

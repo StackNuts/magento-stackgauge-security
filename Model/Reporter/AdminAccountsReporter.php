@@ -16,6 +16,7 @@ use Magento\TwoFactorAuth\Api\TfaInterface;
 use Magento\User\Model\ResourceModel\User\CollectionFactory as AdminUserCollectionFactory;
 use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\MetricCatalogInterface;
 use StackNuts\StackGauge\Api\MetricDefinition;
@@ -50,7 +51,8 @@ class AdminAccountsReporter implements
     ReporterInterface,
     DeclaresCadenceInterface,
     DeclaresSectionInterface,
-    MetricCatalogInterface
+    MetricCatalogInterface,
+    DeclaresSlotInterface
 {
     use DailyCadenceTrait;
     use SecuritySectionTrait;
@@ -394,5 +396,13 @@ class AdminAccountsReporter implements
         }
 
         return $count;
+    }
+
+    /**
+     * Run 0 within this reporter's cadence tier.
+     */
+    public function getSlot(): int
+    {
+        return 0;
     }
 }

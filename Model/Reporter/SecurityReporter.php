@@ -13,6 +13,7 @@ use Magento\Framework\App\MaintenanceMode;
 use Magento\Framework\Module\ModuleListInterface;
 use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\ArrayField;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\ReporterInterface;
@@ -24,7 +25,7 @@ use StackNuts\StackGaugeSecurity\Model\Util\CoreFileTamperScanner;
 use StackNuts\StackGaugeSecurity\Model\Util\FilesystemExposureScanner;
 use StackNuts\StackGaugeSecurity\Model\Util\PubExecutableScanner;
 
-class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface
+class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface, DeclaresSlotInterface
 {
     use DailyCadenceTrait;
     use SecuritySectionTrait;
@@ -268,5 +269,13 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
     private function getAdminFrontName(): string
     {
         return (string)($this->deploymentConfig->get('backend/frontName') ?? self::DEFAULT_ADMIN_PATH);
+    }
+
+    /**
+     * Run 1 within this reporter's cadence tier.
+     */
+    public function getSlot(): int
+    {
+        return 1;
     }
 }

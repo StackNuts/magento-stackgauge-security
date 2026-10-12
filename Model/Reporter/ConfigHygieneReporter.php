@@ -12,6 +12,7 @@ use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\ScopeInterface as AppScopeInterface;
 use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
+use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
@@ -27,7 +28,7 @@ use StackNuts\StackGauge\Model\Reporter\Concern\SecuritySectionTrait;
  * get set once, globally, by whoever built the site, not something that varies per-store-view
  * in practice; a per-store override would still show up if it changed the effective default.
  */
-class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface
+class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface, DeclaresSlotInterface
 {
     use DailyCadenceTrait;
     use SecuritySectionTrait;
@@ -123,5 +124,13 @@ class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
     private function isSetFlag(string $path): bool
     {
         return $this->scopeConfig->isSetFlag($path, AppScopeInterface::SCOPE_DEFAULT);
+    }
+
+    /**
+     * Run 0 within this reporter's cadence tier.
+     */
+    public function getSlot(): int
+    {
+        return 0;
     }
 }
