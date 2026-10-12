@@ -242,19 +242,17 @@ class ContentSignatureReporter implements
     private function scanCmsContent(array $signatures): array
     {
         $matches = [];
-        $truncated = false;
-
         $blockBatches = $this->cmsContentSource->getBlockContentBatches();
         foreach ($blockBatches as $batch) {
             $matches = [...$matches, ...$this->scanner->scan($signatures, 'cms_content', $batch)];
         }
-        $truncated = $truncated || ($blockBatches->getReturn()['truncated'] ?? false);
+        $truncated = $blockBatches->getReturn()['truncated'];
 
         $pageBatches = $this->cmsContentSource->getPageContentBatches();
         foreach ($pageBatches as $batch) {
             $matches = [...$matches, ...$this->scanner->scan($signatures, 'cms_content', $batch)];
         }
-        $truncated = $truncated || ($pageBatches->getReturn()['truncated'] ?? false);
+        $truncated = $pageBatches->getReturn()['truncated'] || $truncated;
 
         return [$matches, $truncated];
     }

@@ -75,7 +75,7 @@ class CmsContentSource
      * @param string $table Logical table name, e.g. "cms_block".
      * @param string $idColumn Primary key column, e.g. "block_id".
      * @param string $locationPrefix Prefixed onto each row's identifier for the yielded key.
-     * @return Generator<array<string, string>, mixed, mixed, array{truncated: bool}>
+     * @return Generator<int, array<string, string>, mixed, array{truncated: bool}>
      */
     private function contentBatches(string $table, string $idColumn, string $locationPrefix): Generator
     {

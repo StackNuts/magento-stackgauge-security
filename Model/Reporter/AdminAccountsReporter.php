@@ -131,7 +131,7 @@ class AdminAccountsReporter implements
     public function getStatus(): array
     {
         $activeAdminIds = $this->adminUserCollectionFactory->create()
-            ->addFieldToFilter('is_active', 1)
+            ->addFieldToFilter('is_active', ['eq' => 1])
             ->getAllIds();
         $totalActive = count($activeAdminIds);
 
@@ -160,7 +160,7 @@ class AdminAccountsReporter implements
         // waits before using it would already be outside the 24h new-account tripwire above.
         // "Active but never logged in" has no legitimate reason to persist indefinitely.
         $dormantAccounts = $this->adminUserCollectionFactory->create()
-            ->addFieldToFilter('is_active', 1)
+            ->addFieldToFilter('is_active', ['eq' => 1])
             ->addFieldToFilter('logdate', ['null' => true])
             ->getSize();
 
