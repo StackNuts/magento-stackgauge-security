@@ -99,4 +99,33 @@ class ContentSignatureScannerTest extends TestCase
 
         $this->assertSame([], $matches);
     }
+
+    /**
+     * A regex that errors (here: PCRE's backtrack limit) must not quietly read as "no match".
+     */
+    public function testARegexThatFailsToRunIsReportedRatherThanSilentlyNotMatching(): void
+    {
+        $previousJit = ini_get('pcre.jit');
+        $previousLimit = ini_get('pcre.backtrack_limit');
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '100');
+
+        try {
+            $scanner = new ContentSignatureScanner();
+            $matches = $scanner->scan([[
+                'id' => 'catastrophic',
+                'name' => 'Catastrophic',
+                'severity' => 'critical',
+                'target' => ['cms_content'],
+                'pattern_type' => 'regex',
+                'pattern' => '/(a+)+$/',
+            ]], 'cms_content', ['block' => str_repeat('a', 30) . 'b']);
+        } finally {
+            ini_set('pcre.jit', (string)$previousJit);
+            ini_set('pcre.backtrack_limit', (string)$previousLimit);
+        }
+
+        $this->assertSame([], $matches);
+        $this->assertSame(['catastrophic'], $scanner->getErroredSignatureIds());
+    }
 }

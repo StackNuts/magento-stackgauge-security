@@ -26,6 +26,14 @@ class ContentSignatureScanner
     private const PATTERN_TYPE_REGEX = 'regex';
 
     /**
+     * Ids of regex signatures that errored (most often PCRE's backtrack limit on a large body)
+     * during any scan() so far - see getErroredSignatureIds().
+     *
+     * @var array<string, true>
+     */
+    private array $erroredSignatureIds = [];
+
+    /**
      * Matches every signature targeting $target against each entry in $content.
      *
      * $signatures is SignatureStore::getSignatures()'s format (id, name, severity, target,
@@ -67,6 +75,19 @@ class ContentSignatureScanner
     }
 
     /**
+     * Signature ids whose regex failed to run (rather than simply not matching) in any scan()
+     * so far. A failed preg_match() returns false, which would otherwise read exactly like
+     * "no match" - a silent false negative on precisely the oversized, obfuscated content most
+     * worth checking. Exposed so ContentSignatureReporter can report it.
+     *
+     * @return list<string>
+     */
+    public function getErroredSignatureIds(): array
+    {
+        return array_keys($this->erroredSignatureIds);
+    }
+
+    /**
      * Whether one signature matches $body.
      *
      * @param array $signature
@@ -76,8 +97,25 @@ class ContentSignatureScanner
     {
         return match ($signature['pattern_type']) {
             self::PATTERN_TYPE_LITERAL => str_contains($body, $signature['pattern']),
-            self::PATTERN_TYPE_REGEX => preg_match($signature['pattern'], $body) === 1,
+            self::PATTERN_TYPE_REGEX => $this->regexMatches($signature, $body),
             default => false,
         };
+    }
+
+    /**
+     * preg_match() for one regex signature, recording it in $erroredSignatureIds if it errors.
+     *
+     * @param array $signature
+     * @param string $body
+     */
+    private function regexMatches(array $signature, string $body): bool
+    {
+        $result = preg_match($signature['pattern'], $body);
+
+        if ($result === false) {
+            $this->erroredSignatureIds[(string)$signature['id']] = true;
+        }
+
+        return $result === 1;
     }
 }

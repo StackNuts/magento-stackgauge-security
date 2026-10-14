@@ -179,6 +179,13 @@ class ContentSignatureReporter implements
                     'generated/code Scan Truncated',
                     $generated['truncated']
                 ),
+                // Regex signatures that couldn't be evaluated against some content (typically
+                // PCRE's backtrack limit) - that content was not checked by them, not "clean".
+                'signature_errors' => $this->field->varchar(
+                    'Signatures That Failed To Run',
+                    implode(', ', $this->scanner->getErroredSignatureIds()),
+                    severity: $this->field->severityIf($this->scanner->getErroredSignatureIds() !== [])
+                ),
             ]),
             'content_signature_matches' => $this->section->table(
                 'content_signature_matches',
