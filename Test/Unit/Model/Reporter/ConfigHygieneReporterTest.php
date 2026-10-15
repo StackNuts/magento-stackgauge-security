@@ -17,8 +17,6 @@ class ConfigHygieneReporterTest extends TestCase
         $scopeConfig->method('isSetFlag')->willReturnMap([
             ['dev/debug/template_hints_storefront', 'default', true],
             ['dev/debug/template_hints_admin', 'default', false],
-            ['dev/css/minify_files', 'default', false],
-            ['dev/js/minify_files', 'default', false],
             ['dev/static/sign', 'default', false],
         ]);
 
@@ -26,8 +24,6 @@ class ConfigHygieneReporterTest extends TestCase
         $fields = $reporter->getStatus()['general']->getFields();
 
         $this->assertTrue($fields['template_hints_enabled']->getValue());
-        $this->assertTrue($fields['css_minify_disabled']->getValue());
-        $this->assertTrue($fields['js_minify_disabled']->getValue());
         $this->assertTrue($fields['static_content_signing_disabled']->getValue());
     }
 
@@ -37,8 +33,6 @@ class ConfigHygieneReporterTest extends TestCase
         $scopeConfig->method('isSetFlag')->willReturnMap([
             ['dev/debug/template_hints_storefront', 'default', false],
             ['dev/debug/template_hints_admin', 'default', false],
-            ['dev/css/minify_files', 'default', true],
-            ['dev/js/minify_files', 'default', true],
             ['dev/static/sign', 'default', true],
         ]);
 
@@ -46,8 +40,6 @@ class ConfigHygieneReporterTest extends TestCase
         $fields = $reporter->getStatus()['general']->getFields();
 
         $this->assertFalse($fields['template_hints_enabled']->getValue());
-        $this->assertFalse($fields['css_minify_disabled']->getValue());
-        $this->assertFalse($fields['js_minify_disabled']->getValue());
         $this->assertFalse($fields['static_content_signing_disabled']->getValue());
     }
 }

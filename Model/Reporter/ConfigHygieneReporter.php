@@ -37,8 +37,6 @@ class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
 
     private const XML_PATH_TEMPLATE_HINTS = 'dev/debug/template_hints_storefront';
     private const XML_PATH_TEMPLATE_HINTS_ADMIN = 'dev/debug/template_hints_admin';
-    private const XML_PATH_CSS_MINIFY = 'dev/css/minify_files';
-    private const XML_PATH_JS_MINIFY = 'dev/js/minify_files';
     private const XML_PATH_STATIC_SIGN = 'dev/static/sign';
 
     /**
@@ -74,7 +72,7 @@ class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
      */
     public function getDescription(): string
     {
-        return 'Dev/debug settings (template hints, minify, static signing) that are risky or costly '
+        return 'Dev/debug settings (template hints, static signing) that are risky or costly '
             . 'left on in production.';
     }
 
@@ -87,14 +85,12 @@ class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
     }
 
     /**
-     * Reports whether template hints, CSS/JS minification, and static-content signing are left in a risky state.
+     * Reports whether template hints and static-content signing are left in a risky state.
      */
     public function getStatus(): array
     {
         $templateHintsOn = $this->isSetFlag(self::XML_PATH_TEMPLATE_HINTS)
             || $this->isSetFlag(self::XML_PATH_TEMPLATE_HINTS_ADMIN);
-        $cssMinifyOff = !$this->isSetFlag(self::XML_PATH_CSS_MINIFY);
-        $jsMinifyOff = !$this->isSetFlag(self::XML_PATH_JS_MINIFY);
         $staticSignOff = !$this->isSetFlag(self::XML_PATH_STATIC_SIGN);
 
         return ['general' => $this->section->facts('general', 'General', $this->getDescription(), [
@@ -106,8 +102,6 @@ class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
                 $templateHintsOn,
                 criticalWhen: true
             ),
-            'css_minify_disabled' => $this->field->bool('CSS Minify Disabled', $cssMinifyOff, criticalWhen: true),
-            'js_minify_disabled' => $this->field->bool('JS Minify Disabled', $jsMinifyOff, criticalWhen: true),
             'static_content_signing_disabled' => $this->field->bool(
                 'Static Content Signing Disabled',
                 $staticSignOff,

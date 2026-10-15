@@ -5,7 +5,6 @@ namespace StackNuts\StackGaugeSecurity\Test\Unit\Model\Reporter;
 
 use PHPUnit\Framework\TestCase;
 use Magento\Framework\App\DeploymentConfig;
-use Magento\Framework\App\MaintenanceMode;
 use Magento\Framework\Module\ModuleListInterface;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\Section\Section;
@@ -30,8 +29,6 @@ class SecurityReporterTest extends TestCase
         array $coreFileTamperMatches = []
     ): SecurityReporter {
         $deploymentConfig = $this->createMock(DeploymentConfig::class);
-        $maintenance = $this->createMock(MaintenanceMode::class);
-        $maintenance->method('isOn')->willReturn(false);
         $filesystemExposureScanner = $this->createMock(FilesystemExposureScanner::class);
         $filesystemExposureScanner->method('scan')->willReturn($findings);
         $pubExecutableScanner = $this->createMock(PubExecutableScanner::class);
@@ -41,7 +38,6 @@ class SecurityReporterTest extends TestCase
 
         return new SecurityReporter(
             $deploymentConfig,
-            $maintenance,
             $moduleList,
             $storefrontProbe,
             $filesystemExposureScanner,
@@ -63,7 +59,7 @@ class SecurityReporterTest extends TestCase
         $fields = $status['general']->getFields();
 
         $this->assertArrayHasKey('is_default_admin_path', $fields);
-        $this->assertArrayHasKey('maintenance_mode', $fields);
+        $this->assertArrayNotHasKey('maintenance_mode', $fields);
         $this->assertArrayHasKey('exposed_paths', $status);
         $this->assertArrayHasKey('filesystem_findings', $status);
         $this->assertFalse($fields['filesystem_exposure_detected']->getValue());

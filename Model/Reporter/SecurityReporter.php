@@ -9,7 +9,6 @@ declare(strict_types=1);
 namespace StackNuts\StackGaugeSecurity\Model\Reporter;
 
 use Magento\Framework\App\DeploymentConfig;
-use Magento\Framework\App\MaintenanceMode;
 use Magento\Framework\Module\ModuleListInterface;
 use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
@@ -36,7 +35,6 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
 
     /**
      * @param DeploymentConfig $deploymentConfig
-     * @param MaintenanceMode $maintenanceMode
      * @param ModuleListInterface $moduleList
      * @param StorefrontProbe $storefrontProbe
      * @param FilesystemExposureScanner $filesystemExposureScanner
@@ -47,7 +45,6 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
      */
     public function __construct(
         private readonly DeploymentConfig $deploymentConfig,
-        private readonly MaintenanceMode $maintenanceMode,
         private readonly ModuleListInterface $moduleList,
         private readonly StorefrontProbe $storefrontProbe,
         private readonly FilesystemExposureScanner $filesystemExposureScanner,
@@ -79,7 +76,7 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
      */
     public function getDescription(): string
     {
-        return 'Admin path/maintenance-mode/sample-data state, exposed sensitive paths, VCS/backup/rogue-PHP '
+        return 'Admin path/sample-data state, exposed sensitive paths, VCS/backup/rogue-PHP '
             . 'files in the webroot, executable files under pub/media or pub/static, and '
             . 'anomalous core-file modification times.';
     }
@@ -95,7 +92,7 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
     /**
      * Reports admin path/maintenance-mode/sample-data state, plus exposed sensitive paths.
      *
-     * Whether the admin path is still the default, maintenance-mode state, any installed
+     * Whether the admin path is still the default, any installed
      * sample-data modules, and any sensitive path exposed from the public storefront.
      */
     public function getStatus(): array
@@ -116,11 +113,6 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
                 'is_default_admin_path' => $this->field->bool(
                     'Is Default Admin Path',
                     $this->getAdminFrontName() === self::DEFAULT_ADMIN_PATH,
-                    criticalWhen: true
-                ),
-                'maintenance_mode' => $this->field->bool(
-                    'Maintenance Mode',
-                    $this->maintenanceMode->isOn(),
                     criticalWhen: true
                 ),
                 'sample_data_present' => $this->field->bool(

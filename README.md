@@ -29,9 +29,9 @@ outside that.
 
 | Reporter | Payload key | What it covers |
 |---|---|---|
-| `SecurityReporter` | `security` | Admin path/maintenance-mode/sample-data state, sensitive paths exposed from the public storefront, VCS/backup/rogue-PHP files in the webroot, executable files under `pub/media`/`pub/static`, and anomalous core-file modification times |
+| `SecurityReporter` | `security` | Admin path/sample-data state, sensitive paths exposed from the public storefront, VCS/backup/rogue-PHP files in the webroot, executable files under `pub/media`/`pub/static`, and anomalous core-file modification times |
 | `AdminAccountsReporter` | `admin_accounts` | Admin account counts, lockouts, failed-login/new-account/dormant-account signals, admin role separation, two-factor enrollment coverage |
-| `ConfigHygieneReporter` | `config_hygiene` | Dev/debug settings (template hints, CSS/JS minify, static signing) left in a risky production state |
+| `ConfigHygieneReporter` | `config_hygiene` | Dev/debug settings (template hints, static signing) left in a risky production state |
 | `ContentSignatureReporter` | `content_signatures` | CMS block/page content, admin-editable HTML/JS config values, and suspicious `pub/` files checked against a hand-curated set of known webshell and Magecart-skimmer content signatures |
 
 `SecurityReporter` never reports the actual admin path, only whether it's still the Magento
