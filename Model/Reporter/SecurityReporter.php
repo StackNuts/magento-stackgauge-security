@@ -15,6 +15,8 @@ use StackNuts\StackGauge\Api\DeclaresSectionInterface;
 use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\ArrayField;
 use StackNuts\StackGauge\Api\Field\Field;
+use StackNuts\StackGauge\Api\MetricCatalogInterface;
+use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
 use StackNuts\StackGauge\Api\Unit;
@@ -25,12 +27,19 @@ use StackNuts\StackGaugeSecurity\Model\Util\CoreFileTamperScanner;
 use StackNuts\StackGaugeSecurity\Model\Util\FilesystemExposureScanner;
 use StackNuts\StackGaugeSecurity\Model\Util\PubExecutableScanner;
 
-class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface, DeclaresSlotInterface
+class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface, DeclaresSlotInterface, MetricCatalogInterface
 {
     use DailyCadenceTrait;
     use SecuritySectionTrait;
 
     private const SCHEMA_VERSION = '1.0';
+
+    /**
+     * Yes/no findings the dashboard alerts on while true - see getTrackableMetrics().
+     */
+    private const FINDING_SAMPLE_DATA = 'security.sample_data_present';
+    private const FINDING_FILESYSTEM_EXPOSURE = 'security.filesystem_exposure_detected';
+    private const FINDING_PUB_EXECUTABLE = 'security.pub_executable_files_detected';
     private const DEFAULT_ADMIN_PATH = 'admin';
 
     /**
@@ -118,17 +127,20 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
                 'sample_data_present' => $this->field->bool(
                     'Sample Data Present',
                     $sampleDataModules !== [],
-                    criticalWhen: true
+                    criticalWhen: true,
+                    metricKey: self::FINDING_SAMPLE_DATA
                 ),
                 'filesystem_exposure_detected' => $this->field->bool(
                     'Filesystem Exposure Detected',
                     $filesystemFindings !== [],
-                    criticalWhen: true
+                    criticalWhen: true,
+                    metricKey: self::FINDING_FILESYSTEM_EXPOSURE
                 ),
                 'pub_executable_files_detected' => $this->field->bool(
                     'Executable Files In pub/media Or pub/static Detected',
                     $pubExecutableFiles !== [],
-                    criticalWhen: true
+                    criticalWhen: true,
+                    metricKey: self::FINDING_PUB_EXECUTABLE
                 ),
                 // Not criticalWhen: true - this is a soft heuristic (see CoreFileTamperScanner's
                 // own docblock), not proof of compromise, so "warning" rather than the same
@@ -270,5 +282,37 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
     public function getSlot(): int
     {
         return 1;
+    }
+
+    /**
+     * This reporter's alertable findings - each the bool field of the same metric key.
+     *
+     * @return MetricDefinition[]
+     */
+    public function getTrackableMetrics(): array
+    {
+        return [
+            MetricDefinition::finding(
+                self::FINDING_SAMPLE_DATA,
+                'Security: Sample Data Present',
+                MetricDefinition::SEVERITY_WARNING,
+                'Magento sample-data modules are installed.',
+                'Sample data ships known content and accounts that shouldn\'t be exposed in production.'
+            ),
+            MetricDefinition::finding(
+                self::FINDING_FILESYSTEM_EXPOSURE,
+                'Security: Filesystem Exposure Detected',
+                MetricDefinition::SEVERITY_CRITICAL,
+                'VCS metadata, a backup file, or an unrecognized PHP file was found in the project root or pub/.',
+                'These can leak source code or credentials, or be used to run arbitrary code.'
+            ),
+            MetricDefinition::finding(
+                self::FINDING_PUB_EXECUTABLE,
+                'Security: Executable Files In pub/media Or pub/static',
+                MetricDefinition::SEVERITY_CRITICAL,
+                'A file with an executable extension was found under pub/media or pub/static.',
+                'Only static assets should exist there - this is a common sign of a webshell upload.'
+            ),
+        ];
     }
 }

@@ -14,6 +14,8 @@ use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
 use StackNuts\StackGauge\Api\DeclaresSlotInterface;
 use StackNuts\StackGauge\Api\Field\Field;
+use StackNuts\StackGauge\Api\MetricCatalogInterface;
+use StackNuts\StackGauge\Api\MetricDefinition;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
 use StackNuts\StackGauge\Model\Reporter\Concern\DailyCadenceTrait;
@@ -28,12 +30,17 @@ use StackNuts\StackGauge\Model\Reporter\Concern\SecuritySectionTrait;
  * get set once, globally, by whoever built the site, not something that varies per-store-view
  * in practice; a per-store override would still show up if it changed the effective default.
  */
-class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface, DeclaresSlotInterface
+class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface, DeclaresSlotInterface, MetricCatalogInterface
 {
     use DailyCadenceTrait;
     use SecuritySectionTrait;
 
     private const SCHEMA_VERSION = '1.0';
+
+    /**
+     * Yes/no findings the dashboard alerts on while true - see getTrackableMetrics().
+     */
+    private const FINDING_STATIC_SIGNING_OFF = 'config_hygiene.static_content_signing_disabled';
 
     private const XML_PATH_TEMPLATE_HINTS = 'dev/debug/template_hints_storefront';
     private const XML_PATH_TEMPLATE_HINTS_ADMIN = 'dev/debug/template_hints_admin';
@@ -105,7 +112,8 @@ class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
             'static_content_signing_disabled' => $this->field->bool(
                 'Static Content Signing Disabled',
                 $staticSignOff,
-                criticalWhen: true
+                criticalWhen: true,
+                metricKey: self::FINDING_STATIC_SIGNING_OFF
             ),
         ])];
     }
@@ -126,5 +134,23 @@ class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
     public function getSlot(): int
     {
         return 0;
+    }
+
+    /**
+     * This reporter's alertable findings - each the bool field of the same metric key.
+     *
+     * @return MetricDefinition[]
+     */
+    public function getTrackableMetrics(): array
+    {
+        return [
+            MetricDefinition::finding(
+                self::FINDING_STATIC_SIGNING_OFF,
+                'Config Hygiene: Static Content Signing Disabled',
+                MetricDefinition::SEVERITY_WARNING,
+                'Static asset signing is turned off.',
+                'Static assets can be served or cached without a way to detect tampering.'
+            ),
+        ];
     }
 }

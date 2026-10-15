@@ -58,6 +58,11 @@ class AdminAccountsReporter implements
     use SecuritySectionTrait;
 
     private const SCHEMA_VERSION = '1.2';
+
+    /**
+     * Yes/no findings the dashboard alerts on while true - see getTrackableMetrics().
+     */
+    private const FINDING_2FA_BYPASS = 'admin_accounts.two_factor_auth_bypass_detected';
     private const METRIC_WITHOUT_2FA = 'admin_accounts.without_2fa';
     private const METRIC_RECENT_FAILED_LOGINS = 'admin_accounts.recent_failed_logins_24h';
     private const METRIC_NEW_ADMINS = 'admin_accounts.new_admins_24h';
@@ -221,7 +226,8 @@ class AdminAccountsReporter implements
             'two_factor_auth_bypass_detected' => $this->field->bool(
                 'Two-Factor Auth Bypass Detected',
                 $bypassDetected,
-                criticalWhen: true
+                criticalWhen: true,
+                metricKey: self::FINDING_2FA_BYPASS
             ),
             'admin_accounts_without_2fa' => $this->field->trackableNumber(
                 'Admin Accounts Without 2FA',
@@ -298,6 +304,13 @@ class AdminAccountsReporter implements
                 null,
                 description: '{value} active admin accounts have never logged in, above the limit of {threshold}.',
                 impact: 'An active account nobody uses is unnecessary attack surface and should be disabled.'
+            ),
+            MetricDefinition::finding(
+                self::FINDING_2FA_BYPASS,
+                'Admin Accounts: Two-Factor Auth Bypass Detected',
+                MetricDefinition::SEVERITY_CRITICAL,
+                'A known module that neuters two-factor enforcement is installed.',
+                'Admin accounts are effectively unprotected by 2FA regardless of enrollment.'
             ),
         ];
     }

@@ -333,7 +333,11 @@ class AdminAccountsReporterTest extends TestCase
             $byKey[$metric->getMetricKey()] = $metric;
         }
 
-        $this->assertCount(4, $metrics);
+        $this->assertCount(5, $metrics);
+        // The 2FA-bypass finding: alerts (critical) while its bool field is true.
+        $this->assertArrayHasKey('admin_accounts.two_factor_auth_bypass_detected', $byKey);
+        $this->assertSame('critical', $byKey['admin_accounts.two_factor_auth_bypass_detected']->getSeverity());
+        $this->assertSame('eq', $byKey['admin_accounts.two_factor_auth_bypass_detected']->getDefaultOperator());
         $this->assertArrayHasKey('admin_accounts.recent_failed_logins_24h', $byKey);
         $this->assertSame(2, $byKey['admin_accounts.recent_failed_logins_24h']->getDefaultThreshold());
         $this->assertArrayHasKey('admin_accounts.new_admins_24h', $byKey);
