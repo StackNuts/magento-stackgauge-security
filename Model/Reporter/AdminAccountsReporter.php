@@ -267,7 +267,8 @@ class AdminAccountsReporter implements
                 1500,
                 null,
                 description: '{value} admin accounts have a recent failed-login streak, above the limit of {threshold}, in the last 24h.',
-                impact: 'A cluster of failed logins can mean a brute-force attempt against the admin panel.'
+                impact: 'A cluster of failed logins can mean a brute-force attempt against the admin panel.',
+                criticalThreshold: 10
             ),
             // Threshold 0 - deliberately the most sensitive metric here. Legitimate admin
             // creation is rare enough that one false positive is worth it to catch a backdoor
@@ -281,7 +282,8 @@ class AdminAccountsReporter implements
                 1500,
                 null,
                 description: '{value} new admin accounts were created in the last 24h, above the limit of {threshold}.',
-                impact: 'An admin account nobody recognizes creating itself is a common sign of a compromise.'
+                impact: 'An admin account nobody recognizes creating itself is a common sign of a compromise.',
+                severity: MetricDefinition::SEVERITY_CRITICAL
             ),
             // Threshold 3, not 0 - a handful of dormant active accounts is normal churn (an
             // ex-employee not yet offboarded, a rarely-used integration account); this is a

@@ -18,6 +18,7 @@ use StackNuts\StackGauge\Api\Field\ArrayField;
 use StackNuts\StackGauge\Api\Field\Field;
 use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
+use StackNuts\StackGauge\Api\Unit;
 use StackNuts\StackGauge\Model\Reporter\Concern\DailyCadenceTrait;
 use StackNuts\StackGauge\Model\Reporter\Concern\SecuritySectionTrait;
 use StackNuts\StackGauge\Model\StorefrontProbe;
@@ -204,7 +205,7 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
             fn (array $match) => $this->field->array($match['package'] . '/' . $match['path'], [
                 'package' => $this->field->varchar('Package', $match['package']),
                 'path' => $this->field->varchar('Path', $match['path']),
-                'drift_hours' => $this->field->number('Drift (hours)', $match['drift_hours']),
+                'drift_hours' => $this->field->number('Drift', $match['drift_hours'], unit: Unit::HOURS),
             ]),
             $matches
         );

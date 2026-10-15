@@ -218,7 +218,8 @@ class ContentSignatureReporter implements
                 1500,
                 null,
                 description: '{value} critical content-signature match(es) found, above the limit of {threshold}.',
-                impact: 'A known webshell or payment-skimmer pattern was found on this store. Investigate immediately.'
+                impact: 'A known webshell or payment-skimmer pattern was found on this store. Investigate immediately.',
+                severity: MetricDefinition::SEVERITY_CRITICAL
             ),
         ];
     }
