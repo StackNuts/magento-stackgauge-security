@@ -19,18 +19,41 @@ use Throwable;
  * Shared bounded, symlink-safe recursive directory walk, used by every scanner that needs to
  * walk part of the local filesystem (PubExecutableScanner, CoreFileTamperScanner,
  * GeneratedCodeScanner). Centralizes the one thing all three needed identically: never follow or
- * even visit a symlink, cap the depth, and treat any mid-walk error (a permission error, usually)
- * as best-effort rather than a failure - whatever $onEntry already saw still counts. Everything
+ * even visit a symlink *inside* the tree, cap the depth, and treat any mid-walk error (a
+ * permission error, usually) as best-effort rather than a failure - whatever $onEntry already saw
+ * still counts, and one unreadable subdirectory only skips that subtree, not the rest of the walk.
+ *
+ * The scan root itself may be a symlink (Deployer/Capistrano/Hypernode releases routinely symlink
+ * pub/media to a shared directory): it is resolved once with realpath() and the walk then runs
+ * on the real path. Callers should build relative paths from resolveRoot(), not from the path
+ * they passed in. Everything
  * domain-specific - which entries to prune, what counts toward a scanner's own cap, what to do
  * with each file - stays with the caller via $pruneFilter and $onEntry.
  */
 class BoundedDirectoryWalker
 {
     /**
-     * Walks $absolutePath in self-first order, calling $onEntry for every surviving entry.
+     * The real (symlink-resolved) path of $absolutePath if it is a readable directory, else null.
      *
-     * Directories are yielded before their own contents. Symlinks are always excluded,
-     * regardless of $pruneFilter.
+     * Only the root is resolved here - symlinks below it are still never followed.
+     *
+     * @param string $absolutePath
+     */
+    public function resolveRoot(string $absolutePath): ?string
+    {
+        // phpcs:ignore Magento2.Functions.DiscouragedFunction.DiscouragedWithAlternative,Magento2.Functions.DiscouragedFunction.Discouraged
+        $real = realpath($absolutePath);
+
+        // phpcs:ignore Magento2.Functions.DiscouragedFunction.DiscouragedWithAlternative,Magento2.Functions.DiscouragedFunction.Discouraged
+        return $real !== false && is_dir($real) ? rtrim($real, '/') : null;
+    }
+
+    /**
+     * Walks $absolutePath (resolved once via resolveRoot()) in self-first order, calling $onEntry for every surviving entry.
+     *
+     * Directories are yielded before their own contents. Symlinks below the root are always
+     * excluded, regardless of $pruneFilter. A directory that cannot be opened is skipped without
+     * ending the walk.
      *
      * @param string $absolutePath
      * @param int $maxDepth
@@ -42,8 +65,8 @@ class BoundedDirectoryWalker
      */
     public function walk(string $absolutePath, int $maxDepth, callable $pruneFilter, callable $onEntry): void
     {
-        // phpcs:ignore Magento2.Functions.DiscouragedFunction.DiscouragedWithAlternative,Magento2.Functions.DiscouragedFunction.Discouraged
-        if (!is_dir($absolutePath) || is_link($absolutePath)) {
+        $absolutePath = $this->resolveRoot($absolutePath);
+        if ($absolutePath === null) {
             return;
         }
 
@@ -66,7 +89,11 @@ class BoundedDirectoryWalker
                 }
             );
 
-            $iterator = new RecursiveIteratorIterator($filtered, RecursiveIteratorIterator::SELF_FIRST);
+            $iterator = new RecursiveIteratorIterator(
+                $filtered,
+                RecursiveIteratorIterator::SELF_FIRST,
+                RecursiveIteratorIterator::CATCH_GET_CHILD
+            );
             $iterator->setMaxDepth($maxDepth);
 
             foreach ($iterator as $file) {

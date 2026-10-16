@@ -22,6 +22,10 @@ use SplFileInfo;
  * way PubExecutableScanner's is: no symlinks, a maximum depth, a file-count cap, and a per-file
  * size cap. Reaching the file cap sets $truncated so the dashboard shows the scan was incomplete
  * rather than silently partial.
+ *
+ * Signatures are filtered to the "generated_php" target before anything is touched: with none
+ * applicable (the bundled set has none), the walk and all those file reads are skipped entirely.
+ * The shared ContentSignatureScanner time budget also ends the walk early (reported as truncated).
  */
 class GeneratedCodeScanner
 {
@@ -52,7 +56,16 @@ class GeneratedCodeScanner
         $matches = [];
         $truncated = false;
 
+        $signatures = array_values(array_filter(
+            $signatures,
+            static fn (array $signature): bool => in_array('generated_php', $signature['target'] ?? [], true)
+        ));
+        if ($signatures === []) {
+            return ['matches' => [], 'truncated' => false];
+        }
+
         $root = $this->safeFileReader->resolveAbsolutePath($this->filesystem, DirectoryList::ROOT, 'generated/code');
+        $root = $root === null ? null : $this->walker->resolveRoot($root);
         if ($root === null) {
             return ['matches' => [], 'truncated' => false];
         }
@@ -72,11 +85,17 @@ class GeneratedCodeScanner
                     return false;
                 }
 
+                if ($this->scanner->isBudgetSpent()) {
+                    $truncated = true;
+                    return false;
+                }
+
                 if ($file->getSize() > self::MAX_FILE_BYTES) {
                     return true;
                 }
 
-                $content = (string)file_get_contents($file->getPathname());
+                // phpcs:ignore Generic.PHP.NoSilencedErrors.Discouraged
+                $content = (string)@file_get_contents($file->getPathname());
                 $relative = ltrim(substr($file->getPathname(), strlen($root)), '/');
                 foreach ($this->scanner->scan($signatures, 'generated_php', ['generated/code/' . $relative => $content]) as $match) {
                     $matches[] = $match;

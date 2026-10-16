@@ -48,7 +48,7 @@ class CmsContentSource
     }
 
     /**
-     * Yields CMS block content in batches, keyed by "cms_block:<identifier>".
+     * Yields CMS block content in batches, keyed by "cms_block:<identifier>#<block_id>".
      *
      * @return Generator<array<string, string>>
      */
@@ -58,7 +58,7 @@ class CmsContentSource
     }
 
     /**
-     * Yields CMS page content in batches, keyed by "cms_page:<identifier>".
+     * Yields CMS page content in batches, keyed by "cms_page:<identifier>#<page_id>".
      *
      * @return Generator<array<string, string>>
      */
@@ -103,7 +103,9 @@ class CmsContentSource
 
                 $batch = [];
                 foreach ($rows as $row) {
-                    $batch[$locationPrefix . $row['identifier']] = (string)$row['content'];
+                    // Identifiers are only unique per store view, so the row id is part of the key -
+                    // otherwise a later row would overwrite an earlier one and never be scanned.
+                    $batch[$locationPrefix . $row['identifier'] . '#' . $row[$idColumn]] = (string)$row['content'];
                     $lastId = (int)$row[$idColumn];
                 }
                 $totalRows += count($rows);

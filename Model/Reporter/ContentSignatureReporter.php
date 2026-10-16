@@ -49,8 +49,9 @@ class ContentSignatureReporter implements
     use DailyCadenceTrait;
     use SecuritySectionTrait;
 
-    private const SCHEMA_VERSION = '1.0';
+    private const SCHEMA_VERSION = '1.1';
     private const METRIC_CRITICAL_MATCHES = 'content_signatures.critical_matches';
+    private const FINDING_NO_SIGNATURES = 'content_signatures.no_signatures_loaded';
 
     /**
      * @param SignatureStore $signatureStore
@@ -114,6 +115,7 @@ class ContentSignatureReporter implements
      */
     public function getStatus(): array
     {
+        $this->scanner->resetBudget();
         $signatures = $this->signatureStore->getSignatures();
 
         [$cmsMatches, $cmsTruncated] = $this->scanCmsContent($signatures);
@@ -139,7 +141,18 @@ class ContentSignatureReporter implements
                     'Signature Set Version',
                     $this->signatureStore->getVersion() ?? 'unknown'
                 ),
-                'signature_count' => $this->field->number('Signatures Loaded', count($signatures)),
+                // Zero signatures means nothing is being detected at all - never a clean bill of health.
+                'signature_count' => $this->field->number(
+                    'Signatures Loaded',
+                    count($signatures),
+                    severity: $signatures === [] ? Field::SEVERITY_CRITICAL : null
+                ),
+                'no_signatures_loaded' => $this->field->bool(
+                    'No Signatures Loaded',
+                    $signatures === [],
+                    criticalWhen: true,
+                    metricKey: self::FINDING_NO_SIGNATURES
+                ),
                 'signature_source' => $this->field->varchar(
                     'Signature Source',
                     $this->sourceLabel($this->signatureStore->getSource()),
@@ -161,7 +174,9 @@ class ContentSignatureReporter implements
                 'matches_detected' => $this->field->bool(
                     'Content Signature Matches Detected',
                     $matches !== [],
-                    criticalWhen: true
+                    // Critical only when a critical-severity signature matched; warning-level
+                    // matches (e.g. String.fromCharCode) stay listed in the table, uncolored here.
+                    criticalWhen: $criticalMatches !== [] ? true : null
                 ),
                 'critical_matches_detected' => $this->field->trackableNumber(
                     'Critical Matches',
@@ -178,6 +193,16 @@ class ContentSignatureReporter implements
                 'generated_code_scan_truncated' => $this->field->bool(
                     'generated/code Scan Truncated',
                     $generated['truncated']
+                ),
+                // Reached the overall scan time budget (ContentSignatureScanner) - some content
+                // was not checked, as with the truncation flags above.
+                'scan_time_budget_exceeded' => $this->field->bool(
+                    'Scan Time Budget Exceeded',
+                    $this->scanner->wasBudgetExceeded()
+                ),
+                'pub_scan_truncated' => $this->field->bool(
+                    'pub/media Or pub/static Scan Truncated',
+                    $this->pubExecutableScanner->wasTruncated()
                 ),
                 // Regex signatures that couldn't be evaluated against some content (typically
                 // PCRE's backtrack limit) - that content was not checked by them, not "clean".
@@ -220,6 +245,13 @@ class ContentSignatureReporter implements
                 description: '{value} critical content-signature match(es) found, above the limit of {threshold}.',
                 impact: 'A known webshell or payment-skimmer pattern was found on this store. Investigate immediately.',
                 severity: MetricDefinition::SEVERITY_CRITICAL
+            ),
+            MetricDefinition::finding(
+                self::FINDING_NO_SIGNATURES,
+                'Content Signatures: No Signatures Loaded',
+                MetricDefinition::SEVERITY_CRITICAL,
+                'Neither a verified fetched signature set nor the bundled set could be loaded.',
+                'With no signatures every content check passes trivially - webshells and skimmers would go unnoticed.'
             ),
         ];
     }

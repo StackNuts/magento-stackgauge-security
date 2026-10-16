@@ -103,4 +103,15 @@ class FilesystemExposureScannerTest extends TestCase
 
         $this->assertSame([], (new FilesystemExposureScanner($filesystem))->scan());
     }
+
+    public function testIgnoresGzippedSitemapsButStillFlagsOtherArchives(): void
+    {
+        $rootDir = $this->dirStub([]);
+        $pubDir = $this->dirStub(['index.php', 'sitemap.xml.gz', 'Sitemap-2.xml.gz', 'dump.sql.gz', 'site.zip']);
+
+        $names = array_column($this->scanner($rootDir, $pubDir)->scan(), 'name');
+        sort($names);
+
+        $this->assertSame(['dump.sql.gz', 'site.zip'], $names);
+    }
 }

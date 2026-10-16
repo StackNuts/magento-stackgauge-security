@@ -128,4 +128,57 @@ class ContentSignatureScannerTest extends TestCase
         $this->assertSame([], $matches);
         $this->assertSame(['catastrophic'], $scanner->getErroredSignatureIds());
     }
+
+    public function testLiteralPatternsAreCaseInsensitive(): void
+    {
+        $matches = (new ContentSignatureScanner())->scan(
+            [$this->signature()],
+            'cms_content',
+            ['a' => 'EVAL(BASE64_DECODE($x))']
+        );
+
+        $this->assertCount(1, $matches);
+    }
+
+    public function testBundledSignaturesIgnoreCaseWhitespaceAndAtPrefix(): void
+    {
+        $bundled = json_decode((string)file_get_contents(dirname(__DIR__, 4) . '/etc/signatures.json'), true);
+        $bodies = [
+            'EVAL(base64_decode($x));',
+            '@eval( base64_decode ($x));',
+            "eval\n(\tgzinflate(\$x));",
+            'ASSERT ( $_POST["x"] );',
+            'System( $_GET["c"] );',
+        ];
+
+        foreach ($bodies as $body) {
+            $this->assertNotSame(
+                [],
+                (new ContentSignatureScanner())->scan($bundled['signatures'], 'pub_php', ['f.php' => $body]),
+                $body
+            );
+        }
+
+        $this->assertNotSame([], (new ContentSignatureScanner())->scan(
+            $bundled['signatures'],
+            'cms_content',
+            ['b' => '<script>EVAL ( atob("x"))</script>']
+        ));
+    }
+
+    public function testStopsScanningOnceTheTimeBudgetIsSpent(): void
+    {
+        $scanner = new ContentSignatureScanner();
+        $scanner->resetBudget();
+        $property = new \ReflectionProperty($scanner, 'budgetStartedAt');
+        $property->setValue($scanner, microtime(true) - 10000);
+
+        $matches = $scanner->scan([$this->signature()], 'cms_content', ['a' => 'eval(base64_decode(']);
+
+        $this->assertSame([], $matches);
+        $this->assertTrue($scanner->wasBudgetExceeded());
+
+        $scanner->resetBudget();
+        $this->assertFalse($scanner->wasBudgetExceeded());
+    }
 }

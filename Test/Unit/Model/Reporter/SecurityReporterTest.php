@@ -204,4 +204,22 @@ class SecurityReporterTest extends TestCase
         $this->assertSame(0, $status['general']->getFields()['core_file_mtime_drift_count']->getValue());
         $this->assertSame([], $status['core_file_mtime_drift']->getRows());
     }
+
+    public function testRootVcsDirectoryIsAWarningNotACriticalExposureFinding(): void
+    {
+        $moduleList = $this->createMock(ModuleListInterface::class);
+        $moduleList->method('getAll')->willReturn([]);
+        $storefrontProbe = $this->createMock(StorefrontProbe::class);
+        $storefrontProbe->method('checkExposedPaths')->willReturn([]);
+
+        $rootGit = ['location' => 'root', 'type' => 'vcs_directory', 'name' => '.git'];
+        $fields = $this->reporter($moduleList, $storefrontProbe, [$rootGit])->getStatus()['general']->getFields();
+
+        $this->assertFalse($fields['filesystem_exposure_detected']->getValue());
+        $this->assertSame(1, $fields['root_vcs_directories']->getValue());
+
+        $pubGit = ['location' => 'pub', 'type' => 'vcs_directory', 'name' => '.git'];
+        $fields = $this->reporter($moduleList, $storefrontProbe, [$rootGit, $pubGit])->getStatus()['general']->getFields();
+        $this->assertTrue($fields['filesystem_exposure_detected']->getValue());
+    }
 }

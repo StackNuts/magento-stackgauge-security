@@ -72,4 +72,83 @@ class PubFileContentReaderTest extends TestCase
 
         $this->assertSame([], $reader->readContents([['directory' => 'pub/media', 'path' => 'shell.php']]));
     }
+
+    /**
+     * A ReadInterface over real files under $base, so size caps and reads are genuine.
+     */
+    private function realFilesystem(string $base): Filesystem
+    {
+        $root = $this->createStub(ReadInterface::class);
+        $root->method('isExist')->willReturnCallback(static fn (string $p): bool => file_exists($base . '/' . $p));
+        $root->method('stat')->willReturnCallback(static function (string $p) use ($base): array {
+            if (str_contains($p, 'unstatable')) {
+                throw new RuntimeException('stat failed');
+            }
+
+            return ['size' => (int)filesize($base . '/' . $p)];
+        });
+        $root->method('readFile')->willReturnCallback(static fn (string $p): string => (string)file_get_contents($base . '/' . $p));
+        $filesystem = $this->createStub(Filesystem::class);
+        $filesystem->method('getDirectoryRead')->willReturn($root);
+
+        return $filesystem;
+    }
+
+    public function testReadsRealFilesSkipsOversizedAndKeepsGoingAfterAnUnreadableOne(): void
+    {
+        $base = sys_get_temp_dir() . '/sg-pubreader-' . uniqid('', true);
+        mkdir($base . '/pub/media/wysiwyg', 0777, true);
+        file_put_contents($base . '/pub/media/wysiwyg/shell.php', '<?php eval($_POST[1]);');
+        file_put_contents($base . '/pub/media/unstatable.php', 'x');
+        file_put_contents($base . '/pub/media/huge.php', str_repeat('A', 2_000_001));
+        file_put_contents($base . '/pub/media/exactly-cap.php', str_repeat('A', 2_000_000));
+
+        try {
+            $reader = new PubFileContentReader($this->realFilesystem($base), new SafeFileReader(new Json()));
+            $content = $reader->readContents([
+                ['directory' => 'pub/media', 'path' => 'unstatable.php'],
+                ['directory' => 'pub/media', 'path' => 'huge.php'],
+                ['directory' => 'pub/media/', 'path' => '/wysiwyg/shell.php'],
+                ['directory' => 'pub/media', 'path' => 'exactly-cap.php'],
+                ['directory' => 'pub/media', 'path' => 'gone.php'],
+            ]);
+
+            $this->assertSame(
+                ['pub_file:pub/media/wysiwyg/shell.php', 'pub_file:pub/media/exactly-cap.php'],
+                array_keys($content)
+            );
+            $this->assertSame('<?php eval($_POST[1]);', $content['pub_file:pub/media/wysiwyg/shell.php']);
+        } finally {
+            foreach (glob($base . '/pub/media/*.php') ?: [] as $f) {
+                unlink($f);
+            }
+            unlink($base . '/pub/media/wysiwyg/shell.php');
+            rmdir($base . '/pub/media/wysiwyg');
+            rmdir($base . '/pub/media');
+            rmdir($base . '/pub');
+            rmdir($base);
+        }
+    }
+
+    public function testReadsThroughASymlinkedMediaDirectory(): void
+    {
+        $base = sys_get_temp_dir() . '/sg-pubreader-' . uniqid('', true);
+        mkdir($base . '/shared', 0777, true);
+        mkdir($base . '/pub', 0777, true);
+        file_put_contents($base . '/shared/shell.php', 'payload');
+        symlink($base . '/shared', $base . '/pub/media');
+
+        try {
+            $reader = new PubFileContentReader($this->realFilesystem($base), new SafeFileReader(new Json()));
+            $content = $reader->readContents([['directory' => 'pub/media', 'path' => 'shell.php']]);
+
+            $this->assertSame(['pub_file:pub/media/shell.php' => 'payload'], $content);
+        } finally {
+            unlink($base . '/pub/media');
+            unlink($base . '/shared/shell.php');
+            rmdir($base . '/shared');
+            rmdir($base . '/pub');
+            rmdir($base);
+        }
+    }
 }

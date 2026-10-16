@@ -8,9 +8,11 @@ declare(strict_types=1);
 
 namespace StackNuts\StackGaugeSecurity\Model\Util;
 
+use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\Filesystem\DirectoryList;
 use Magento\Framework\Filesystem;
 use Magento\Framework\Module\Dir;
+use Magento\Store\Model\ScopeInterface;
 use Throwable;
 
 /**
@@ -18,8 +20,12 @@ use Throwable;
  * feed (see SignatureFeedFetcher), cached under var/, and falls back to the copy bundled in
  * etc/signatures.json when there is no cache yet, or the cache fails validation.
  *
- * Both sources are validated on every read, not just when they're written - a cache file that's
- * corrupt or hand-edited is ignored rather than trusted. Neither source being usable is never an
+ * The cache is verified on every read, not just when it's written: its stored detached Ed25519
+ * signature (signatures.json.sig) must verify against the pinned keys (SignatureVerifier), and it
+ * must pass SignatureSetValidator (which rejects an empty set). A cache that's corrupt, unsigned or
+ * hand-edited is ignored rather than trusted. The cache is also ignored while the "Signature Feed
+ * Updates" admin toggle is off, so Off really does mean bundled-only. The bundled set ships inside
+ * the module and is only structurally validated. Neither source being usable is never an
  * error: getSignatures() returns [] and the reporter still reports whatever else it can.
  *
  * getSource() and getLastFeedFetch() exist purely so the dashboard can show *which* set is active
@@ -36,6 +42,8 @@ class SignatureStore
     private const MODULE_NAME = 'StackNuts_StackGaugeSecurity';
     private const SIGNATURES_FILE = 'signatures.json';
     private const CACHE_PATH = 'stacknuts_stackgaugesecurity/signatures.json';
+    private const CACHE_SIGNATURE_PATH = 'stacknuts_stackgaugesecurity/signatures.json.sig';
+    private const XML_PATH_FEED_ENABLED = 'stacknuts_stackgauge/general/signature_feed_enabled';
     private const STATUS_PATH = 'stacknuts_stackgaugesecurity/feed_status.json';
 
     /**
@@ -50,12 +58,16 @@ class SignatureStore
      * @param Dir $moduleDir
      * @param SafeFileReader $safeFileReader
      * @param SignatureSetValidator $validator
+     * @param SignatureVerifier $verifier
+     * @param ScopeConfigInterface $scopeConfig
      */
     public function __construct(
         private readonly Filesystem $filesystem,
         private readonly Dir $moduleDir,
         private readonly SafeFileReader $safeFileReader,
-        private readonly SignatureSetValidator $validator
+        private readonly SignatureSetValidator $validator,
+        private readonly SignatureVerifier $verifier,
+        private readonly ScopeConfigInterface $scopeConfig
     ) {
     }
 
@@ -126,7 +138,9 @@ class SignatureStore
             return $this->resolved;
         }
 
-        $cache = $this->readValid($this->readCache());
+        $cache = $this->scopeConfig->isSetFlag(self::XML_PATH_FEED_ENABLED, ScopeInterface::SCOPE_STORE)
+            ? $this->readValid($this->readCache())
+            : null;
         if ($cache !== null) {
             return $this->resolved = [self::SOURCE_FEED, $cache];
         }
@@ -140,13 +154,26 @@ class SignatureStore
     }
 
     /**
+     * The cached feed, decoded, or null if it is missing, unsigned or its signature doesn't verify.
+     *
      * @return array<string, mixed>|null
      */
     private function readCache(): ?array
     {
         $var = $this->safeFileReader->getDirectoryRead($this->filesystem, DirectoryList::VAR_DIR);
+        if ($var === null) {
+            return null;
+        }
 
-        return $var !== null ? $this->safeFileReader->readJson($var, self::CACHE_PATH) : null;
+        $body = $this->safeFileReader->readRaw($var, self::CACHE_PATH);
+        $signature = $this->safeFileReader->readRaw($var, self::CACHE_SIGNATURE_PATH);
+        if ($body === null || $signature === null || !$this->verifier->isSignedByTrustedKey($body, $signature)) {
+            return null;
+        }
+
+        $decoded = json_decode($body, true);
+
+        return is_array($decoded) ? $decoded : null;
     }
 
     /**

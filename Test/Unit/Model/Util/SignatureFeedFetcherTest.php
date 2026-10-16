@@ -17,6 +17,7 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use StackNuts\StackGaugeSecurity\Model\Util\SignatureFeedFetcher;
 use StackNuts\StackGaugeSecurity\Model\Util\SignatureSetValidator;
+use StackNuts\StackGaugeSecurity\Model\Util\SignatureVerifier;
 
 class SignatureFeedFetcherTest extends TestCase
 {
@@ -84,22 +85,34 @@ class SignatureFeedFetcherTest extends TestCase
             new SignatureSetValidator(),
             new Json(),
             $logger ?? $this->createStub(LoggerInterface::class),
-            ['test-key' => base64_encode(sodium_crypto_sign_publickey($this->keypair))]
+            new SignatureVerifier(['test-key' => base64_encode(sodium_crypto_sign_publickey($this->keypair))])
         );
     }
 
     /**
      * @return array{0: WriteInterface, 1: object{written: list<string>, contents: array<string, string>}}
      */
-    private function recordingWrite(?string $cachedFeed = null): array
+    private function recordingWrite(?string $cachedFeed = null, ?string $cachedSignature = 'auto'): array
     {
+        if ($cachedSignature === 'auto') {
+            $cachedSignature = $cachedFeed === null ? null : $this->sign($cachedFeed);
+        }
+
         $recorder = new \stdClass();
         $recorder->written = [];
         $recorder->contents = [];
 
         $write = $this->createStub(WriteInterface::class);
-        $write->method('isExist')->willReturn($cachedFeed !== null);
-        $write->method('readFile')->willReturn((string)$cachedFeed);
+        $write->method('isExist')->willReturnCallback(
+            static fn (string $path): bool => str_ends_with($path, '.sig')
+                ? $cachedSignature !== null
+                : $cachedFeed !== null
+        );
+        $write->method('readFile')->willReturnCallback(
+            static fn (string $path): string => str_ends_with($path, '.sig')
+                ? (string)$cachedSignature
+                : (string)$cachedFeed
+        );
         $write->method('create')->willReturn(true);
         $write->method('writeFile')->willReturnCallback(
             function (string $path, string $content) use ($recorder): int {
@@ -130,6 +143,10 @@ class SignatureFeedFetcherTest extends TestCase
 
         $this->assertTrue($fetcher->refresh());
         $this->assertContains('stacknuts_stackgaugesecurity/signatures.json', $recorder->written);
+        $this->assertSame(
+            $this->sign(self::VALID_FEED),
+            $recorder->contents['stacknuts_stackgaugesecurity/signatures.json.sig']
+        );
 
         $status = json_decode($recorder->contents['stacknuts_stackgaugesecurity/feed_status.json'], true);
         $this->assertSame('success', $status['status']);
@@ -204,6 +221,40 @@ class SignatureFeedFetcherTest extends TestCase
         $this->assertSame('signature feed older than cached set', $status['message']);
     }
 
+    /**
+     * A planted cache ("version 9999", unsigned or badly signed) must not block every real feed
+     * as "older" forever.
+     */
+    public function testAnUnverifiableCacheDoesNotBlockARealFeed(): void
+    {
+        $planted = str_replace('2026.10.0', '9999.0', self::VALID_FEED);
+
+        foreach ([null, 'forged'] as $cachedSignature) {
+            [$write, $recorder] = $this->recordingWrite($planted, $cachedSignature);
+
+            $fetcher = $this->fetcher([
+                'signatures.json' => [200, self::VALID_FEED],
+                'signatures.json.sig' => [200, $this->sign(self::VALID_FEED)],
+            ], $write);
+
+            $this->assertTrue($fetcher->refresh());
+            $this->assertContains('stacknuts_stackgaugesecurity/signatures.json', $recorder->written);
+        }
+    }
+
+    public function testRejectsAValidlySignedEmptyFeed(): void
+    {
+        $empty = '{"version":"2026.12.0","signatures":[]}';
+        [$write] = $this->recordingWrite();
+
+        $fetcher = $this->fetcher([
+            'signatures.json' => [200, $empty],
+            'signatures.json.sig' => [200, $this->sign($empty)],
+        ], $write);
+
+        $this->assertFalse($fetcher->refresh());
+    }
+
     public function testKeepsTheCacheWhenTheFeedCannotBeDownloaded(): void
     {
         [$write, $recorder] = $this->recordingWrite();
@@ -243,8 +294,7 @@ class SignatureFeedFetcherTest extends TestCase
      */
     public function testThePinnedProductionKeysAreWellFormed(): void
     {
-        $reflection = new \ReflectionClassConstant(SignatureFeedFetcher::class, 'TRUSTED_KEYS');
-        $keys = $reflection->getValue();
+        $keys = SignatureVerifier::TRUSTED_KEYS;
 
         $this->assertNotEmpty($keys);
         foreach ($keys as $keyId => $publicKey) {

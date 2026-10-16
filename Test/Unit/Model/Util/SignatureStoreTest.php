@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 namespace StackNuts\StackGaugeSecurity\Test\Unit\Model\Util;
 
+use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Filesystem;
 use Magento\Framework\Filesystem\Directory\ReadInterface;
 use Magento\Framework\Module\Dir;
@@ -15,10 +16,29 @@ use Magento\Framework\Serialize\Serializer\Json;
 use PHPUnit\Framework\TestCase;
 use StackNuts\StackGaugeSecurity\Model\Util\SafeFileReader;
 use StackNuts\StackGaugeSecurity\Model\Util\SignatureSetValidator;
+use StackNuts\StackGaugeSecurity\Model\Util\SignatureVerifier;
 use StackNuts\StackGaugeSecurity\Model\Util\SignatureStore;
 
 class SignatureStoreTest extends TestCase
 {
+    private string $keypair;
+
+    protected function setUp(): void
+    {
+        $this->keypair = sodium_crypto_sign_keypair();
+    }
+
+    private function sign(string $body, ?string $secretKey = null): string
+    {
+        return (string)json_encode([
+            'algorithm' => 'ed25519',
+            'key_id' => 'test-key',
+            'signature' => base64_encode(
+                sodium_crypto_sign_detached($body, $secretKey ?? sodium_crypto_sign_secretkey($this->keypair))
+            ),
+        ]);
+    }
+
     private function set(string $version, string $id): string
     {
         return json_encode([
@@ -39,14 +59,31 @@ class SignatureStoreTest extends TestCase
      * @param string|null $bundled Contents of the bundled etc/signatures.json, or null for "absent".
      * @param string|null $feedStatus Contents of the var/ feed-status file, or null for "absent".
      */
-    private function store(?string $cache, ?string $bundled, ?string $feedStatus = null): SignatureStore
-    {
+    private function store(
+        ?string $cache,
+        ?string $bundled,
+        ?string $feedStatus = null,
+        ?string $cacheSignature = 'auto',
+        bool $feedEnabled = true
+    ): SignatureStore {
+        if ($cacheSignature === 'auto') {
+            $cacheSignature = $cache === null ? null : $this->sign($cache);
+        }
+
         $varDir = $this->createStub(ReadInterface::class);
         $varDir->method('isExist')->willReturnCallback(
-            static fn (string $path): bool => str_ends_with($path, 'feed_status.json') ? $feedStatus !== null : $cache !== null
+            static fn (string $path): bool => match (true) {
+                str_ends_with($path, 'feed_status.json') => $feedStatus !== null,
+                str_ends_with($path, '.sig') => $cacheSignature !== null,
+                default => $cache !== null,
+            }
         );
         $varDir->method('readFile')->willReturnCallback(
-            static fn (string $path): string => str_ends_with($path, 'feed_status.json') ? ($feedStatus ?? '') : ($cache ?? '')
+            static fn (string $path): string => match (true) {
+                str_ends_with($path, 'feed_status.json') => $feedStatus ?? '',
+                str_ends_with($path, '.sig') => $cacheSignature ?? '',
+                default => $cache ?? '',
+            }
         );
 
         $etcDir = $this->createStub(ReadInterface::class);
@@ -60,7 +97,17 @@ class SignatureStoreTest extends TestCase
         $moduleDir = $this->createStub(Dir::class);
         $moduleDir->method('getDir')->willReturn('/app/code/StackNuts/StackGaugeSecurity/etc');
 
-        return new SignatureStore($filesystem, $moduleDir, new SafeFileReader(new Json()), new SignatureSetValidator());
+        $scopeConfig = $this->createStub(ScopeConfigInterface::class);
+        $scopeConfig->method('isSetFlag')->willReturn($feedEnabled);
+
+        return new SignatureStore(
+            $filesystem,
+            $moduleDir,
+            new SafeFileReader(new Json()),
+            new SignatureSetValidator(),
+            new SignatureVerifier(['test-key' => base64_encode(sodium_crypto_sign_publickey($this->keypair))]),
+            $scopeConfig
+        );
     }
 
     public function testPrefersAValidCachedFeedOverTheBundledSet(): void
@@ -69,6 +116,39 @@ class SignatureStoreTest extends TestCase
 
         $this->assertSame('2026.11.0', $store->getVersion());
         $this->assertSame('from-cache', $store->getSignatures()[0]['id']);
+    }
+
+    public function testIgnoresACacheWithoutASignatureOrWithABadOne(): void
+    {
+        $planted = $this->set('9999.0', 'planted');
+        $attackerKey = sodium_crypto_sign_secretkey(sodium_crypto_sign_keypair());
+
+        foreach ([null, $this->sign($planted, $attackerKey), 'garbage'] as $signature) {
+            $store = $this->store($planted, $this->set('2026.10.0', 'bundled'), cacheSignature: $signature);
+
+            $this->assertSame('bundled', $store->getSignatures()[0]['id']);
+            $this->assertSame(SignatureStore::SOURCE_BUNDLED, $store->getSource());
+        }
+    }
+
+    public function testIgnoresAnEmptySignedCache(): void
+    {
+        $empty = '{"version":"9999.0","signatures":[]}';
+
+        $store = $this->store($empty, $this->set('2026.10.0', 'bundled'));
+
+        $this->assertSame(SignatureStore::SOURCE_BUNDLED, $store->getSource());
+    }
+
+    public function testIgnoresTheCacheWhenTheFeedToggleIsOff(): void
+    {
+        $store = $this->store(
+            $this->set('2026.11.0', 'from-cache'),
+            $this->set('2026.10.0', 'bundled'),
+            feedEnabled: false
+        );
+
+        $this->assertSame(SignatureStore::SOURCE_BUNDLED, $store->getSource());
     }
 
     public function testFallsBackToTheBundledSetWhenThereIsNoCache(): void

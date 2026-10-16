@@ -111,6 +111,14 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
             static fn (string $name): bool => str_contains($name, 'SampleData')
         ));
         $filesystemFindings = $this->filesystemExposureScanner->scan();
+        // A root-level VCS directory is expected on git-based deploys and only matters if the
+        // docroot is misconfigured (which the exposed_paths probe catches) - shown as a warning,
+        // not counted towards the critical filesystem-exposure finding.
+        $criticalFilesystemFindings = array_values(array_filter(
+            $filesystemFindings,
+            static fn (array $finding): bool => !($finding['location'] === 'root' && $finding['type'] === 'vcs_directory')
+        ));
+        $rootVcsDirectories = count($filesystemFindings) - count($criticalFilesystemFindings);
         $pubExecutableFiles = $this->pubExecutableScanner->scan();
         $tamperedCoreFiles = $this->coreFileTamperScanner->scan();
 
@@ -132,15 +140,24 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
                 ),
                 'filesystem_exposure_detected' => $this->field->bool(
                     'Filesystem Exposure Detected',
-                    $filesystemFindings !== [],
+                    $criticalFilesystemFindings !== [],
                     criticalWhen: true,
                     metricKey: self::FINDING_FILESYSTEM_EXPOSURE
+                ),
+                'root_vcs_directories' => $this->field->number(
+                    'VCS Directories In Project Root',
+                    $rootVcsDirectories,
+                    severity: $this->field->severityIf($rootVcsDirectories > 0)
                 ),
                 'pub_executable_files_detected' => $this->field->bool(
                     'Executable Files In pub/media Or pub/static Detected',
                     $pubExecutableFiles !== [],
                     criticalWhen: true,
                     metricKey: self::FINDING_PUB_EXECUTABLE
+                ),
+                'pub_scan_truncated' => $this->field->bool(
+                    'pub/media Or pub/static Scan Truncated',
+                    $this->pubExecutableScanner->wasTruncated()
                 ),
                 // Not criticalWhen: true - this is a soft heuristic (see CoreFileTamperScanner's
                 // own docblock), not proof of compromise, so "warning" rather than the same
@@ -186,8 +203,8 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
             'core_file_mtime_drift' => $this->section->table(
                 'core_file_mtime_drift',
                 'Core Files With Anomalous mtime Drift',
-                'A soft heuristic, not proof of tampering: PHP files under vendor/magento/* or '
-                    . 'vendor/mage-os/* whose modified time drifts more than 48h newer than the '
+                'A soft heuristic, not proof of tampering: PHP/PHTML/JS files under vendor/magento/* or '
+                    . 'vendor/mage-os/* (excluding files composer patches touch) whose modified time drifts more than 48h newer than the '
                     . 'rest of their own package - see CoreFileTamperScanner for why this can be '
                     . 'beaten by a plain `touch` and what it\'s actually good for.',
                 $this->coreFileTamperFields($tamperedCoreFiles)
@@ -303,7 +320,7 @@ class SecurityReporter implements ReporterInterface, DeclaresCadenceInterface, D
                 self::FINDING_FILESYSTEM_EXPOSURE,
                 'Security: Filesystem Exposure Detected',
                 MetricDefinition::SEVERITY_CRITICAL,
-                'VCS metadata, a backup file, or an unrecognized PHP file was found in the project root or pub/.',
+                'A backup file or an unrecognized PHP file was found in the project root or pub/, or VCS metadata was found in pub/.',
                 'These can leak source code or credentials, or be used to run arbitrary code.'
             ),
             MetricDefinition::finding(

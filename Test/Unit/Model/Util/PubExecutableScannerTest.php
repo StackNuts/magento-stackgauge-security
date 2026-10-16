@@ -98,12 +98,88 @@ class PubExecutableScannerTest extends TestCase
         $this->assertSame([], $this->scanner()->scan());
     }
 
-    public function testPrunesCacheDirectoriesRatherThanScanningThem(): void
+    public function testPrunesOnlyTheProductImageCacheByPath(): void
     {
         mkdir($this->root . '/pub/media/catalog/product/cache', 0777, true);
         file_put_contents($this->root . '/pub/media/catalog/product/cache/evil.php', '<?php /* test fixture */');
 
         $this->assertSame([], $this->scanner()->scan());
+    }
+
+    public function testDoesNotPruneOtherCacheOrTmpDirectories(): void
+    {
+        foreach (['tmp', 'downloadable/tmp', 'catalog/product/tmp', 'wysiwyg/cache'] as $dir) {
+            mkdir($this->root . '/pub/media/' . $dir, 0777, true);
+            file_put_contents($this->root . '/pub/media/' . $dir . '/shell.php', '<?php /* test fixture */');
+        }
+
+        $paths = array_column($this->scanner()->scan(), 'path');
+        sort($paths);
+
+        $this->assertSame([
+            'catalog/product/tmp/shell.php',
+            'downloadable/tmp/shell.php',
+            'tmp/shell.php',
+            'wysiwyg/cache/shell.php',
+        ], $paths);
+    }
+
+    public function testWalksPriorityDropLocationsEvenWhenTheRestOfMediaExhaustsTheBudget(): void
+    {
+        mkdir($this->root . '/pub/media/catalog/product', 0777, true);
+        for ($i = 0; $i < 5100; $i++) {
+            touch($this->root . '/pub/media/catalog/product/img' . $i . '.jpg');
+        }
+        mkdir($this->root . '/pub/media/custom_options/quote', 0777, true);
+        file_put_contents($this->root . '/pub/media/custom_options/quote/shell.php', '<?php /* test fixture */');
+
+        $scanner = $this->scanner();
+
+        $this->assertSame('custom_options/quote/shell.php', $scanner->scan()[0]['path']);
+        $this->assertTrue($scanner->wasTruncated());
+    }
+
+    public function testNotTruncatedForASmallTree(): void
+    {
+        file_put_contents($this->root . '/pub/media/a.jpg', 'x');
+
+        $scanner = $this->scanner();
+
+        $this->assertSame([], $scanner->scan());
+        $this->assertFalse($scanner->wasTruncated());
+    }
+
+    public function testScansASymlinkedMediaRoot(): void
+    {
+        $shared = $this->root . '/shared_media';
+        mkdir($shared . '/wysiwyg', 0777, true);
+        file_put_contents($shared . '/wysiwyg/shell.php', '<?php /* test fixture */');
+        $this->removeDirectory($this->root . '/pub/media');
+        symlink($shared, $this->root . '/pub/media');
+
+        $matches = $this->scanner()->scan();
+
+        $this->assertCount(1, $matches);
+        $this->assertSame('wysiwyg/shell.php', $matches[0]['path']);
+    }
+
+    public function testFlagsWiderExecutableExtensionsAndUserIni(): void
+    {
+        foreach (['a.php7', 'b.phps', 'c.inc', '.user.ini', 'd.PHP'] as $name) {
+            file_put_contents($this->root . '/pub/media/' . $name, 'x');
+        }
+
+        $this->assertCount(5, $this->scanner()->scan());
+    }
+
+    public function testMemoisesTheResultWithinOneRun(): void
+    {
+        $scanner = $this->scanner();
+        $this->assertSame([], $scanner->scan());
+
+        file_put_contents($this->root . '/pub/media/late.php', 'x');
+
+        $this->assertSame([], $scanner->scan());
     }
 
     public function testNeverFollowsASymlinkedDirectory(): void

@@ -19,11 +19,25 @@ namespace StackNuts\StackGaugeSecurity\Model\Util;
  * targets (see SignatureStore::getSignatures()'s "target" key) - a webshell signature never
  * runs against CMS content and vice versa, keeping false-positive surface area to exactly
  * what each signature was written against.
+ *
+ * Literal patterns are matched case-insensitively (`EVAL(` evades nothing); signatures that also
+ * need to tolerate whitespace or comments between tokens are written as regexes with the `i` flag
+ * and `\s*`. A wall-clock budget (MAX_SCAN_SECONDS, started by resetBudget() or the first scan())
+ * bounds the total regex time across every source, as a backstop against a pathological pattern
+ * run over many files - once spent, scan() returns nothing further and wasBudgetExceeded() is true.
  */
 class ContentSignatureScanner
 {
     private const PATTERN_TYPE_LITERAL = 'literal';
     private const PATTERN_TYPE_REGEX = 'regex';
+    private const MAX_SCAN_SECONDS = 120.0;
+
+    /**
+     * @var float|null Microtime at which the current budget started, or null before the first scan.
+     */
+    private ?float $budgetStartedAt = null;
+
+    private bool $budgetExceeded = false;
 
     /**
      * Ids of regex signatures that errored (most often PCRE's backtrack limit on a large body)
@@ -32,6 +46,37 @@ class ContentSignatureScanner
      * @var array<string, true>
      */
     private array $erroredSignatureIds = [];
+
+    /**
+     * Starts a fresh time budget and clears the exceeded flag - call at the start of each report run.
+     */
+    public function resetBudget(): void
+    {
+        $this->budgetStartedAt = microtime(true);
+        $this->budgetExceeded = false;
+    }
+
+    /**
+     * Whether the scan time budget ran out, so some content went unchecked.
+     */
+    public function wasBudgetExceeded(): bool
+    {
+        return $this->budgetExceeded;
+    }
+
+    /**
+     * Whether the budget is spent (and records it) - callers walking many files can stop early.
+     */
+    public function isBudgetSpent(): bool
+    {
+        $this->budgetStartedAt ??= microtime(true);
+
+        if (microtime(true) - $this->budgetStartedAt > self::MAX_SCAN_SECONDS) {
+            $this->budgetExceeded = true;
+        }
+
+        return $this->budgetExceeded;
+    }
 
     /**
      * Matches every signature targeting $target against each entry in $content.
@@ -59,6 +104,10 @@ class ContentSignatureScanner
         $matches = [];
 
         foreach ($content as $location => $body) {
+            if ($this->isBudgetSpent()) {
+                break;
+            }
+
             foreach ($applicable as $signature) {
                 if ($this->matches($signature, $body)) {
                     $matches[] = [
@@ -96,7 +145,7 @@ class ContentSignatureScanner
     private function matches(array $signature, string $body): bool
     {
         return match ($signature['pattern_type']) {
-            self::PATTERN_TYPE_LITERAL => str_contains($body, $signature['pattern']),
+            self::PATTERN_TYPE_LITERAL => stripos($body, (string)$signature['pattern']) !== false,
             self::PATTERN_TYPE_REGEX => $this->regexMatches($signature, $body),
             default => false,
         };

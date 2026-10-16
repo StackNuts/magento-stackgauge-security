@@ -71,4 +71,50 @@ class SignatureSetValidatorTest extends TestCase
             'signatures' => [$this->signature(['pattern_type' => 'regex', 'pattern' => '/eval\s*\(/i'])],
         ]));
     }
+
+    public function testRejectsAnEmptySet(): void
+    {
+        $this->assertFalse((new SignatureSetValidator())->isValid(['signatures' => []]));
+    }
+
+    public function testRejectsNonStringIdAndPatternWithoutThrowing(): void
+    {
+        $validator = new SignatureSetValidator();
+
+        $this->assertFalse($validator->isValid(['signatures' => [$this->signature(['id' => ['x']])]]));
+        $this->assertFalse($validator->isValid(['signatures' => [$this->signature(['pattern' => ['x']])]]));
+        $this->assertFalse($validator->isValid(['signatures' => [$this->signature(['target' => [1]])]]));
+        $this->assertFalse($validator->isValid(['signatures' => [$this->signature(['name' => ['x']])]]));
+    }
+
+    public function testRejectsAnOverlongPatternAndAnOversizedSet(): void
+    {
+        $validator = new SignatureSetValidator();
+
+        $this->assertFalse($validator->isValid([
+            'signatures' => [$this->signature(['pattern' => str_repeat('a', 2001)])],
+        ]));
+
+        $many = [];
+        for ($i = 0; $i < 501; $i++) {
+            $many[] = $this->signature(['id' => 'sig-' . $i]);
+        }
+        $this->assertFalse($validator->isValid(['signatures' => $many]));
+    }
+
+    public function testRejectsNestedQuantifiers(): void
+    {
+        foreach (['/(a+)+$/', '/(.*)*x/', '/(\\w+\\s*)+z/', '/(a|b*){2,}/'] as $pattern) {
+            $this->assertFalse((new SignatureSetValidator())->isValid([
+                'signatures' => [$this->signature(['pattern_type' => 'regex', 'pattern' => $pattern])],
+            ]), $pattern);
+        }
+    }
+
+    public function testAcceptsTheBundledSet(): void
+    {
+        $bundled = json_decode((string)file_get_contents(dirname(__DIR__, 4) . '/etc/signatures.json'), true);
+
+        $this->assertTrue((new SignatureSetValidator())->isValid($bundled));
+    }
 }

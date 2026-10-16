@@ -10,6 +10,8 @@ namespace StackNuts\StackGaugeSecurity\Model\Reporter;
 
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\ScopeInterface as AppScopeInterface;
+use Magento\Store\Model\ScopeInterface as StoreScopeInterface;
+use Magento\Store\Model\StoreManagerInterface;
 use StackNuts\StackGauge\Api\DeclaresCadenceInterface;
 use StackNuts\StackGauge\Api\DeclaresSectionInterface;
 use StackNuts\StackGauge\Api\DeclaresSlotInterface;
@@ -20,15 +22,16 @@ use StackNuts\StackGauge\Api\ReporterInterface;
 use StackNuts\StackGauge\Api\Section\Section;
 use StackNuts\StackGauge\Model\Reporter\Concern\DailyCadenceTrait;
 use StackNuts\StackGauge\Model\Reporter\Concern\SecuritySectionTrait;
+use Throwable;
 
 /**
  * Flags a fixed list of dev/debug settings that are fine on a local box but leak information
  * or cost performance left on in production - invisible from the storefront itself (unlike,
  * say, template hints, which a merchant would at least notice) until someone goes looking.
  *
- * Every flag here is read at the default scope only - these are the kind of settings that
- * get set once, globally, by whoever built the site, not something that varies per-store-view
- * in practice; a per-store override would still show up if it changed the effective default.
+ * Template hints are checked at the default scope and for every store view (they are routinely
+ * switched on for a single store view while debugging); the admin hint flag and static-content
+ * signing are global settings and are read at the default scope.
  */
 class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterface, DeclaresSectionInterface, DeclaresSlotInterface, MetricCatalogInterface
 {
@@ -48,11 +51,13 @@ class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
 
     /**
      * @param ScopeConfigInterface $scopeConfig
+     * @param StoreManagerInterface $storeManager
      * @param Field $field
      * @param Section $section
      */
     public function __construct(
         private readonly ScopeConfigInterface $scopeConfig,
+        private readonly StoreManagerInterface $storeManager,
         private readonly Field $field,
         private readonly Section $section
     ) {
@@ -97,6 +102,7 @@ class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
     public function getStatus(): array
     {
         $templateHintsOn = $this->isSetFlag(self::XML_PATH_TEMPLATE_HINTS)
+            || $this->isStorefrontHintsOnInAnyStore()
             || $this->isSetFlag(self::XML_PATH_TEMPLATE_HINTS_ADMIN);
         $staticSignOff = !$this->isSetFlag(self::XML_PATH_STATIC_SIGN);
 
@@ -112,10 +118,31 @@ class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
             'static_content_signing_disabled' => $this->field->bool(
                 'Static Content Signing Disabled',
                 $staticSignOff,
-                criticalWhen: true,
                 metricKey: self::FINDING_STATIC_SIGNING_OFF
             ),
         ])];
+    }
+
+    /**
+     * Whether storefront template hints are enabled in any individual store view.
+     */
+    private function isStorefrontHintsOnInAnyStore(): bool
+    {
+        try {
+            foreach ($this->storeManager->getStores() as $store) {
+                if ($this->scopeConfig->isSetFlag(
+                    self::XML_PATH_TEMPLATE_HINTS,
+                    StoreScopeInterface::SCOPE_STORE,
+                    $store->getId()
+                )) {
+                    return true;
+                }
+            }
+        } catch (Throwable) {
+            // Best-effort - the default-scope check above still stands.
+        }
+
+        return false;
     }
 
     /**
@@ -149,7 +176,7 @@ class ConfigHygieneReporter implements ReporterInterface, DeclaresCadenceInterfa
                 'Config Hygiene: Static Content Signing Disabled',
                 MetricDefinition::SEVERITY_WARNING,
                 'Static asset signing is turned off.',
-                'Static assets can be served or cached without a way to detect tampering.'
+                'Static asset URLs carry no version signature, so browsers and CDNs can keep serving stale CSS/JS after a deploy.'
             ),
         ];
     }

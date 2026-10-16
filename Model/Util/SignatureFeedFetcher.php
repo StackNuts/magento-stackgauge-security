@@ -19,16 +19,18 @@ use Throwable;
  * Downloads the published signature set from the StackNuts signatures repo and caches it under
  * var/. Only a fetch that passes every check replaces the cache:
  *
- * - its detached Ed25519 signature (signatures.json.sig) verifies against one of TRUSTED_KEYS,
- *   which are pinned here in the module - so neither someone able to push to the signatures repo
+ * - its detached Ed25519 signature (signatures.json.sig) verifies against one of the keys pinned in
+ *   SignatureVerifier::TRUSTED_KEYS - so neither someone able to push to the signatures repo
  *   nor anything between here and GitHub can get rules onto a store, yet a new set still ships
  *   the moment a signed release lands on main, with no module update;
- * - its version is not older than the cached set's, so an old, validly signed feed can't be
- *   replayed to roll detections back;
+ * - its version is not older than the cached set's (the cache is only used as a baseline if its
+ *   own stored signature still verifies), so an old, validly signed feed can't be replayed to
+ *   roll detections back;
  * - it passes SignatureSetValidator.
  *
- * Anything else leaves the previous good cache in place - a bad fetch never degrades detection
- * below what was already working.
+ * The signature is stored next to the cache (signatures.json.sig) and re-verified on every read by
+ * SignatureStore. Anything else leaves the previous good cache in place - a bad fetch never
+ * degrades detection below what was already working.
  *
  * Every attempt - success or failure - is recorded to a small status file under var/ (read back by
  * SignatureStore::getLastFeedFetch()) so the dashboard can show when the feed was last checked and
@@ -51,15 +53,6 @@ class SignatureFeedFetcher
     private const CACHE_DIR = 'stacknuts_stackgaugesecurity';
 
     /**
-     * Base64 Ed25519 public keys allowed to sign the feed, by key id - the same ids as the
-     * signatures repo's signing-keys/<id>.pub. To rotate: add the new key here alongside the old
-     * one, release, start signing with the new key, then drop the old one in a later release.
-     */
-    private const TRUSTED_KEYS = [
-        'stackgauge-2026-10' => 'FK/VR4hQNnPLg0E98ArlZW2MK2Vs+rClGNKpBk7E8mI=',
-    ];
-
-    /**
      * A CurlFactory rather than a shared Curl - Magento's shared instance keeps whatever headers
      * the last caller set (StackGauge's dashboard Authorization header, a Cloudflare API token),
      * which would otherwise be sent to GitHub along with this request.
@@ -69,8 +62,7 @@ class SignatureFeedFetcher
      * @param SignatureSetValidator $validator
      * @param Json $json
      * @param LoggerInterface $logger
-     * @param array<string, string> $trustedKeys key id => base64 public key; TRUSTED_KEYS unless a test
-     *     needs to sign with its own throwaway key
+     * @param SignatureVerifier $verifier Holds the pinned trusted keys.
      */
     public function __construct(
         private readonly CurlFactory $curlFactory,
@@ -78,7 +70,7 @@ class SignatureFeedFetcher
         private readonly SignatureSetValidator $validator,
         private readonly Json $json,
         private readonly LoggerInterface $logger,
-        private readonly array $trustedKeys = self::TRUSTED_KEYS
+        private readonly SignatureVerifier $verifier
     ) {
     }
 
@@ -99,7 +91,7 @@ class SignatureFeedFetcher
                 );
             }
 
-            if (!$this->isSignedByTrustedKey($body, $signature)) {
+            if (!$this->verifier->isSignedByTrustedKey($body, $signature)) {
                 return $this->fail(
                     'signature feed is not signed by a trusted key; keeping cached set.',
                     'signature feed signature invalid'
@@ -121,7 +113,7 @@ class SignatureFeedFetcher
                 );
             }
 
-            $this->writeCache($body);
+            $this->writeCache($body, $signature);
             $this->recordStatus(true, null);
             return true;
         } catch (Throwable $e) {
@@ -162,48 +154,42 @@ class SignatureFeedFetcher
     }
 
     /**
-     * Whether $signatureFile ({"algorithm": "ed25519", "key_id": ..., "signature": <base64>})
-     * is a valid detached signature over the exact bytes of $body by one of TRUSTED_KEYS.
+     * The currently cached feed, decoded - but only if its stored signature still verifies. A
+     * cache that is missing, unsigned or fails verification is treated as absent, so it can neither
+     * block a genuine feed (e.g. a planted "version 9999") nor be used as the baseline.
      *
-     * @param string $body
-     * @param string $signatureFile
+     * @return array<string, mixed>|null
      */
-    private function isSignedByTrustedKey(string $body, string $signatureFile): bool
+    private function verifiedCache(): ?array
     {
-        $envelope = json_decode($signatureFile, true);
-        if (!is_array($envelope) || ($envelope['algorithm'] ?? null) !== 'ed25519') {
-            return false;
+        $var = $this->filesystem->getDirectoryWrite(DirectoryList::VAR_DIR);
+        $cachePath = self::CACHE_DIR . '/' . self::FEED_FILE;
+        $sigPath = self::CACHE_DIR . '/' . self::SIGNATURE_FILE;
+
+        if (!$var->isExist($cachePath) || !$var->isExist($sigPath)) {
+            return null;
         }
 
-        $publicKey = base64_decode($this->trustedKeys[$envelope['key_id'] ?? ''] ?? '', true);
-        $signature = base64_decode((string)($envelope['signature'] ?? ''), true);
-
-        if ($publicKey === false || strlen($publicKey) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES
-            || $signature === false || strlen($signature) !== SODIUM_CRYPTO_SIGN_BYTES
-        ) {
-            return false;
+        $body = $var->readFile($cachePath);
+        if (!$this->verifier->isSignedByTrustedKey($body, $var->readFile($sigPath))) {
+            return null;
         }
 
-        return sodium_crypto_sign_verify_detached($signature, $body, $publicKey);
+        $cached = json_decode($body, true);
+
+        return is_array($cached) ? $cached : null;
     }
 
     /**
      * Whether $decoded's version is older than the currently cached feed's. A missing or
-     * unreadable cache (first fetch) is never "newer".
+     * unverifiable cache (first fetch) is never "newer".
      *
      * @param array<string, mixed> $decoded
      */
     private function isOlderThanCache(array $decoded): bool
     {
-        $var = $this->filesystem->getDirectoryWrite(DirectoryList::VAR_DIR);
-        $cachePath = self::CACHE_DIR . '/' . self::FEED_FILE;
-
-        if (!$var->isExist($cachePath)) {
-            return false;
-        }
-
-        $cached = json_decode($var->readFile($cachePath), true);
-        $cachedVersion = is_array($cached) ? ($cached['version'] ?? null) : null;
+        $cached = $this->verifiedCache();
+        $cachedVersion = $cached['version'] ?? null;
         $newVersion = $decoded['version'] ?? null;
 
         if (!is_string($cachedVersion) || !is_string($newVersion)) {
@@ -216,14 +202,19 @@ class SignatureFeedFetcher
     /**
      * Writes to a temp file and renames over the cache, so a reader never sees a half-written file.
      */
-    private function writeCache(string $body): void
+    private function writeCache(string $body, string $signature): void
     {
         $var = $this->filesystem->getDirectoryWrite(DirectoryList::VAR_DIR);
         $var->create(self::CACHE_DIR);
 
-        $tmp = self::CACHE_DIR . '/' . self::FEED_FILE . '.tmp';
-        $var->writeFile($tmp, $body);
-        $var->renameFile($tmp, self::CACHE_DIR . '/' . self::FEED_FILE);
+        // The signature goes in first: a reader that sees the new body always finds a signature
+        // that matches it or (briefly) the old one, which fails verification and falls back to the
+        // bundled set rather than trusting an unsigned file.
+        foreach ([self::SIGNATURE_FILE => $signature, self::FEED_FILE => $body] as $file => $content) {
+            $tmp = self::CACHE_DIR . '/' . $file . '.tmp';
+            $var->writeFile($tmp, $content);
+            $var->renameFile($tmp, self::CACHE_DIR . '/' . $file);
+        }
     }
 
     /**

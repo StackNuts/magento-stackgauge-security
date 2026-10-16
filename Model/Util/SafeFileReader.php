@@ -68,6 +68,25 @@ class SafeFileReader
     }
 
     /**
+     * Reads the raw bytes of $relativePath from $directory, or null if it is missing or unreadable.
+     *
+     * @param ReadInterface $directory
+     * @param string $relativePath
+     */
+    public function readRaw(ReadInterface $directory, string $relativePath): ?string
+    {
+        try {
+            if (!$directory->isExist($relativePath)) {
+                return null;
+            }
+
+            return $directory->readFile($relativePath);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * Reads and JSON-decodes $relativePath from $directory, or null on any failure.
      *
      * Covers a missing or unreadable file and content that doesn't decode to an array.

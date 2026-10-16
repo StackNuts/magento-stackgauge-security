@@ -122,12 +122,23 @@ class FilesystemExposureScanner
 
             // phpcs:ignore Magento2.Functions.DiscouragedFunction.DiscouragedWithAlternative
             $extension = strtolower((string)pathinfo($entry, PATHINFO_EXTENSION));
-            if (in_array($extension, self::BACKUP_EXTENSIONS, true)) {
+            if (in_array($extension, self::BACKUP_EXTENSIONS, true) && !$this->isSitemapArchive($entry)) {
                 $matches[] = $entry;
             }
         }
 
         return $matches;
+    }
+
+    /**
+     * Whether $entry is a gzipped sitemap (sitemap.xml.gz, sitemap-1.xml.gz, ...) - Magento's own
+     * sitemap generator writes these into pub/ and they are meant to be public.
+     *
+     * @param string $entry
+     */
+    private function isSitemapArchive(string $entry): bool
+    {
+        return preg_match('/^sitemap[^\/]*\.xml\.gz$/i', $entry) === 1;
     }
 
     /**

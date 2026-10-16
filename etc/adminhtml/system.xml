@@ -5,7 +5,7 @@
             <group id="general">
                 <field id="signature_feed_enabled" translate="label comment" type="select" sortOrder="67" showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>Signature Feed Updates</label>
-                    <comment>Once a day, download the latest content-signature set from StackNuts' signatures repository and use it in place of the copy bundled with this module. The download is checksum-verified and validated before use; on any failure the previous set stays in place. Off keeps the bundled set only.</comment>
+                    <comment>Once a day, download the latest content-signature set from StackNuts' signatures repository and use it in place of the copy bundled with this module. The download must carry a valid signature from a key pinned in this module and pass validation before it is used (the signature is re-checked every time the cached copy is read); on any failure the previous set stays in place. Off ignores any cached download and uses only the set bundled with this module.</comment>
                     <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
                 </field>
             </group>

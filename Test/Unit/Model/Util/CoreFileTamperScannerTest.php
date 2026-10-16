@@ -13,6 +13,7 @@ use Magento\Framework\Filesystem\Directory\ReadInterface;
 use Magento\Framework\Serialize\Serializer\Json;
 use PHPUnit\Framework\TestCase;
 use StackNuts\StackGaugeSecurity\Model\Util\BoundedDirectoryWalker;
+use StackNuts\StackGaugeSecurity\Model\Util\ComposerPatchedFiles;
 use StackNuts\StackGaugeSecurity\Model\Util\CoreFileTamperScanner;
 use StackNuts\StackGaugeSecurity\Model\Util\SafeFileReader;
 
@@ -85,11 +86,23 @@ class CoreFileTamperScannerTest extends TestCase
         $rootDir->method('getAbsolutePath')->willReturnCallback(
             fn (string $path) => $this->root . '/' . $path
         );
+        $rootDir->method('isExist')->willReturnCallback(fn (string $p): bool => file_exists($this->root . '/' . $p));
+        $rootDir->method('isFile')->willReturnCallback(fn (string $p): bool => is_file($this->root . '/' . $p));
+        $rootDir->method('stat')->willReturnCallback(fn (string $p): array => ['size' => (int)filesize($this->root . '/' . $p)]);
+        $rootDir->method('readFile')->willReturnCallback(
+            fn (string $p): string => (string)file_get_contents($this->root . '/' . $p)
+        );
 
         $filesystem = $this->createStub(Filesystem::class);
         $filesystem->method('getDirectoryRead')->willReturn($rootDir);
+        $reader = new SafeFileReader(new Json());
 
-        return new CoreFileTamperScanner($filesystem, new SafeFileReader(new Json()), new BoundedDirectoryWalker());
+        return new CoreFileTamperScanner(
+            $filesystem,
+            $reader,
+            new BoundedDirectoryWalker(),
+            new ComposerPatchedFiles($filesystem, $reader)
+        );
     }
 
     public function testFlagsAFileThatDriftsFarNewerThanItsPackageSiblings(): void
@@ -168,5 +181,42 @@ class CoreFileTamperScannerTest extends TestCase
         }
 
         $this->assertSame([], $this->scanner()->scan());
+    }
+
+    public function testChecksPhtmlAndJsFilesToo(): void
+    {
+        $now = time();
+        $package = $this->root . '/vendor/magento/module-checkout';
+        for ($i = 1; $i <= 4; $i++) {
+            $this->writeFileAt("{$package}/view/File{$i}.php", $now - 86400 * 30);
+        }
+        $this->writeFileAt("{$package}/view/frontend/templates/skimmer.phtml", $now - 86400 * 20);
+        $this->writeFileAt("{$package}/view/frontend/web/js/skimmer.js", $now - 86400 * 20);
+
+        $paths = array_column($this->scanner()->scan(), 'path');
+        sort($paths);
+
+        $this->assertSame(['view/frontend/templates/skimmer.phtml', 'view/frontend/web/js/skimmer.js'], $paths);
+    }
+
+    public function testExcludesFilesTouchedByAComposerPatch(): void
+    {
+        $now = time();
+        $package = $this->root . '/vendor/magento/module-catalog';
+        for ($i = 1; $i <= 5; $i++) {
+            $this->writeFileAt("{$package}/Model/File{$i}.php", $now - 86400 * 30);
+        }
+        $this->writeFileAt("{$package}/Model/Patched.php", $now - 86400 * 10);
+        $this->writeFileAt("{$package}/Model/Tampered.php", $now - 86400 * 10);
+
+        mkdir($this->root . '/patches', 0777, true);
+        file_put_contents($this->root . '/patches/fix.patch', "--- a/Model/Patched.php\n+++ b/Model/Patched.php\n@@ -1 +1 @@\n-a\n+b\n");
+        file_put_contents($this->root . '/composer.json', json_encode([
+            'extra' => ['patches' => ['magento/module-catalog' => ['Fix' => 'patches/fix.patch']]],
+        ]));
+
+        $paths = array_column($this->scanner()->scan(), 'path');
+
+        $this->assertSame(['Model/Tampered.php'], $paths);
     }
 }

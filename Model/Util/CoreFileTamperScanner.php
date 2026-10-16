@@ -13,7 +13,7 @@ use Magento\Framework\Filesystem;
 use SplFileInfo;
 
 /**
- * Heuristic core-file tamper check: flags PHP files under vendor/magento/* and vendor/mage-os/*
+ * Heuristic core-file tamper check: flags PHP, PHTML and JS files (the Magecart targets) under vendor/magento/* and vendor/mage-os/*
  * whose mtime drifts anomalously newer than the rest of their own package's files. A
  * `composer install` writes every file in a package at roughly the same time, so one file
  * sitting days newer than its own package siblings is a signal something touched it directly
@@ -26,6 +26,10 @@ use SplFileInfo;
  * determined attacker who thought to cover their tracks. A proper version would hash every
  * vendor file against a known-good manifest, which Composer doesn't provide by default and is
  * a meaningfully bigger feature than this one.
+ *
+ * Files a composer patch is known to touch (see ComposerPatchedFiles) are left out of the
+ * comparison entirely, so legitimately hot-patched files don't fill the match cap with false
+ * positives.
  *
  * Bounded per-package (a cap on files inspected within one package, with the same
  * never-follow-symlinks, no-deep-recursion discipline as PubExecutableScanner) and in
@@ -42,20 +46,27 @@ class CoreFileTamperScanner
     private const VENDOR_PREFIXES = ['magento', 'mage-os'];
 
     private const DRIFT_THRESHOLD_SECONDS = 172800; // 48 hours
-    private const MAX_FILES_PER_PACKAGE = 2000;
-    private const MAX_TOTAL_FILES_VISITED = 50000;
+    private const MAX_FILES_PER_PACKAGE = 6000;
+    private const MAX_TOTAL_FILES_VISITED = 80000;
     private const MAX_DEPTH = 10;
     private const MAX_MATCHES = 80;
+
+    /**
+     * @var list<string>
+     */
+    private const SCANNED_EXTENSIONS = ['php', 'phtml', 'js'];
 
     /**
      * @param Filesystem $filesystem
      * @param SafeFileReader $safeFileReader
      * @param BoundedDirectoryWalker $walker
+     * @param ComposerPatchedFiles $patchedFiles
      */
     public function __construct(
         private readonly Filesystem $filesystem,
         private readonly SafeFileReader $safeFileReader,
-        private readonly BoundedDirectoryWalker $walker
+        private readonly BoundedDirectoryWalker $walker,
+        private readonly ComposerPatchedFiles $patchedFiles
     ) {
     }
 
@@ -125,7 +136,7 @@ class CoreFileTamperScanner
     /**
      * Bounded scan of one package's PHP file mtimes for anomalous drift.
      *
-     * Collects .php file mtimes within one package (bounded by MAX_FILES_PER_PACKAGE), then
+     * Collects .php/.phtml/.js file mtimes within one package (bounded by MAX_FILES_PER_PACKAGE), then
      * flags any whose drift from the package's own median mtime exceeds DRIFT_THRESHOLD_SECONDS.
      *
      * @param string $packageLabel
@@ -135,24 +146,30 @@ class CoreFileTamperScanner
     private function scanPackage(string $packageLabel, string $packagePath): array
     {
         $mtimesByPath = [];
+        $walkRoot = $this->walker->resolveRoot($packagePath);
+        if ($walkRoot === null) {
+            return [[], 0];
+        }
 
         $this->walker->walk(
-            $packagePath,
+            $walkRoot,
             self::MAX_DEPTH,
             static fn (SplFileInfo $file): bool => true,
-            function (SplFileInfo $file) use (&$mtimesByPath, $packagePath): bool {
+            function (SplFileInfo $file) use (&$mtimesByPath, $packageLabel, $walkRoot): bool {
                 if (count($mtimesByPath) >= self::MAX_FILES_PER_PACKAGE) {
                     return false;
                 }
 
-                if (!$file->isFile() || strtolower($file->getExtension()) !== 'php') {
+                if (!$file->isFile() || !in_array(strtolower($file->getExtension()), self::SCANNED_EXTENSIONS, true)) {
                     return true;
                 }
 
                 $mtime = $file->getMTime();
                 if ($mtime !== false) {
-                    $relativePath = ltrim(substr($file->getPathname(), strlen($packagePath)), '/');
-                    $mtimesByPath[$relativePath] = $mtime;
+                    $relativePath = ltrim(substr($file->getPathname(), strlen($walkRoot)), '/');
+                    if (!$this->patchedFiles->isPatched($packageLabel, $relativePath)) {
+                        $mtimesByPath[$relativePath] = $mtime;
+                    }
                 }
 
                 return true;

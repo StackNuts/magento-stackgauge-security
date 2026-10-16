@@ -100,7 +100,7 @@ bin/magento module:disable StackNuts_StackGaugeSecurity
 composer remove stacknuts/magento-stackgauge-security
 ```
 
-This module persists no state of its own - nothing for `module:uninstall` to clean up.
+This module caches the signature feed and fetch status under `var/stacknuts_stackgaugesecurity/`, which `module:uninstall` does not remove; delete that directory by hand if you want it gone. It has no database tables or config data of its own.
 
 ## License
 

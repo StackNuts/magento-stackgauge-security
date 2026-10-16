@@ -24,7 +24,8 @@ class AdminAccountsReporterTest extends TestCase
         int $locked,
         int $recentFailures,
         int $newAdmins,
-        int $dormant = 0
+        int $dormant = 0,
+        int $staleLogins = 0
     ): AdminUserCollectionFactory {
         $activeIdsCollection = $this->createMock(AdminUserCollection::class);
         $activeIdsCollection->method('addFieldToFilter')->willReturnSelf();
@@ -46,13 +47,18 @@ class AdminAccountsReporterTest extends TestCase
         $dormantCollection->method('addFieldToFilter')->willReturnSelf();
         $dormantCollection->method('getSize')->willReturn($dormant);
 
+        $staleLoginsCollection = $this->createMock(AdminUserCollection::class);
+        $staleLoginsCollection->method('addFieldToFilter')->willReturnSelf();
+        $staleLoginsCollection->method('getSize')->willReturn($staleLogins);
+
         $factory = $this->createMock(AdminUserCollectionFactory::class);
         $factory->method('create')->willReturnOnConsecutiveCalls(
             $activeIdsCollection,
             $lockedCollection,
             $recentFailuresCollection,
             $newAdminsCollection,
-            $dormantCollection
+            $dormantCollection,
+            $staleLoginsCollection
         );
 
         return $factory;
@@ -311,6 +317,71 @@ class AdminAccountsReporterTest extends TestCase
         $this->assertSame('latest', $metrics[0]->getAggregation());
     }
 
+    public function testDisabledTwoFactorModuleIsACriticalFinding(): void
+    {
+        $reporter = new AdminAccountsReporter(
+            $this->userCollectionFactory([1], 0, 0, 0),
+            $this->moduleList(tfaPresent: false, bypassPresent: false),
+            $this->createMock(ObjectManagerInterface::class),
+            $this->resourceConnectionWithNoRoleData(),
+            new Clock(),
+            new Field(),
+            new Section()
+        );
+
+        $fields = $reporter->getStatus()['general']->getFields();
+        $this->assertTrue($fields['two_factor_auth_disabled']->getValue());
+        $this->assertSame('admin_accounts.two_factor_auth_disabled', $fields['two_factor_auth_disabled']->jsonSerialize()['metric_key']);
+
+        $byKey = [];
+        foreach ($reporter->getTrackableMetrics() as $metric) {
+            $byKey[$metric->getMetricKey()] = $metric;
+        }
+        $this->assertSame('critical', $byKey['admin_accounts.two_factor_auth_disabled']->getSeverity());
+    }
+
+    public function testReportsStaleLoginsAndStalePasswords(): void
+    {
+        $now = time();
+        $select = $this->createMock(Select::class);
+        $select->method('from')->willReturnSelf();
+        $select->method('where')->willReturnSelf();
+        $select->method('group')->willReturnSelf();
+        $connection = $this->createMock(AdapterInterface::class);
+        $connection->method('select')->willReturn($select);
+        $connection->method('fetchCol')->willReturn([]);
+        $connection->method('fetchRow')->willReturn(['total' => 0, 'full_access' => 0]);
+        // First fetchPairs: MAX(last_updated) per user; second: active users' creation dates.
+        $connection->method('fetchPairs')->willReturnOnConsecutiveCalls(
+            [1 => $now - 400 * 86400, 2 => $now - 10 * 86400],
+            [
+                1 => gmdate('Y-m-d H:i:s', $now - 800 * 86400),
+                2 => gmdate('Y-m-d H:i:s', $now - 800 * 86400),
+                3 => gmdate('Y-m-d H:i:s', $now - 500 * 86400),
+                4 => gmdate('Y-m-d H:i:s', $now - 5 * 86400),
+            ]
+        );
+        $resourceConnection = $this->createMock(ResourceConnection::class);
+        $resourceConnection->method('getConnection')->willReturn($connection);
+        $resourceConnection->method('getTableName')->willReturnArgument(0);
+
+        $reporter = new AdminAccountsReporter(
+            $this->userCollectionFactory([1, 2, 3, 4], 0, 0, 0, staleLogins: 2),
+            $this->moduleList(tfaPresent: false, bypassPresent: false),
+            $this->createMock(ObjectManagerInterface::class),
+            $resourceConnection,
+            new Clock(),
+            new Field(),
+            new Section()
+        );
+
+        $fields = $reporter->getStatus()['general']->getFields();
+
+        $this->assertSame(2, $fields['stale_logins_90d']->getValue());
+        // User 1 (changed 400d ago) and user 3 (no history, created 500d ago) are stale; 2 and 4 are not.
+        $this->assertSame(2, $fields['stale_passwords']->getValue());
+    }
+
     public function testDeclaresTheTripwireTrackableMetrics(): void
     {
         $factory = $this->createMock(AdminUserCollectionFactory::class);
@@ -333,7 +404,7 @@ class AdminAccountsReporterTest extends TestCase
             $byKey[$metric->getMetricKey()] = $metric;
         }
 
-        $this->assertCount(5, $metrics);
+        $this->assertCount(8, $metrics);
         // The 2FA-bypass finding: alerts (critical) while its bool field is true.
         $this->assertArrayHasKey('admin_accounts.two_factor_auth_bypass_detected', $byKey);
         $this->assertSame('critical', $byKey['admin_accounts.two_factor_auth_bypass_detected']->getSeverity());

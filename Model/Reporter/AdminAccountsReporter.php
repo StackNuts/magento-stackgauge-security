@@ -57,16 +57,23 @@ class AdminAccountsReporter implements
     use DailyCadenceTrait;
     use SecuritySectionTrait;
 
-    private const SCHEMA_VERSION = '1.2';
+    private const SCHEMA_VERSION = '1.3';
 
     /**
      * Yes/no findings the dashboard alerts on while true - see getTrackableMetrics().
      */
     private const FINDING_2FA_BYPASS = 'admin_accounts.two_factor_auth_bypass_detected';
+    private const FINDING_2FA_DISABLED = 'admin_accounts.two_factor_auth_disabled';
     private const METRIC_WITHOUT_2FA = 'admin_accounts.without_2fa';
     private const METRIC_RECENT_FAILED_LOGINS = 'admin_accounts.recent_failed_logins_24h';
     private const METRIC_NEW_ADMINS = 'admin_accounts.new_admins_24h';
     private const METRIC_DORMANT_ACCOUNTS = 'admin_accounts.dormant_accounts';
+    private const METRIC_STALE_PASSWORDS = 'admin_accounts.stale_passwords';
+    private const METRIC_STALE_LOGINS = 'admin_accounts.stale_logins_90d';
+
+    private const TFA_MODULE = 'Magento_TwoFactorAuth';
+    private const PASSWORD_MAX_AGE_DAYS = 365;
+    private const LAST_LOGIN_MAX_AGE_DAYS = 90;
 
     /**
      * A known dev-convenience module that neuters 2FA enforcement regardless of
@@ -169,11 +176,25 @@ class AdminAccountsReporter implements
             ->addFieldToFilter('logdate', ['null' => true])
             ->getSize();
 
+        // Accounts that do log in, but not for a long time - the complement of the "never logged
+        // in" dormant check above (logdate IS NULL).
+        $staleLoginCutoff = $this->clock->now()
+            ->modify('-' . self::LAST_LOGIN_MAX_AGE_DAYS . ' days')->format('Y-m-d H:i:s');
+        $staleLogins = $this->adminUserCollectionFactory->create()
+            ->addFieldToFilter('is_active', ['eq' => 1])
+            ->addFieldToFilter('logdate', ['notnull' => true])
+            ->addFieldToFilter('logdate', ['lt' => $staleLoginCutoff])
+            ->getSize();
+        $stalePasswords = $this->countStalePasswords();
+
         $roleStats = $this->fetchAdminRoleStats();
         // Only meaningful with 2+ admins - one admin necessarily has full access to everything,
         // and that's not a lack of separation of duties, just the only role there is.
         $allActiveAdminsHaveFullAccess = $roleStats['total'] > 1 && $roleStats['full_access'] === $roleStats['total'];
 
+        // `module:disable Magento_TwoFactorAuth` is the most common way to switch 2FA off outright;
+        // with the module gone nothing enforces it, whatever enrollment looks like.
+        $tfaDisabled = !$this->moduleList->has(self::TFA_MODULE);
         $tfa = $this->resolveTwoFactorAuth();
         $bypassDetected = $this->moduleList->has(self::TFA_BYPASS_MODULE);
         // "Active" means present AND not known to be neutered - not just isEnabled(), which
@@ -222,7 +243,27 @@ class AdminAccountsReporter implements
                 $allActiveAdminsHaveFullAccess,
                 criticalWhen: true
             ),
+            'stale_passwords' => $this->field->trackableNumber(
+                'Passwords Older Than ' . self::PASSWORD_MAX_AGE_DAYS . ' Days',
+                $stalePasswords,
+                self::METRIC_STALE_PASSWORDS,
+                MetricDefinition::AGGREGATION_LATEST,
+                severity: $this->field->severityIf($stalePasswords > 0)
+            ),
+            'stale_logins_90d' => $this->field->trackableNumber(
+                'Active Accounts Not Logged In For ' . self::LAST_LOGIN_MAX_AGE_DAYS . '+ Days',
+                $staleLogins,
+                self::METRIC_STALE_LOGINS,
+                MetricDefinition::AGGREGATION_LATEST,
+                severity: $this->field->severityIf($staleLogins > 0)
+            ),
             'two_factor_auth_enabled' => $this->field->bool('Two-Factor Auth Enabled', $tfaActive),
+            'two_factor_auth_disabled' => $this->field->bool(
+                'Two-Factor Auth Disabled',
+                $tfaDisabled,
+                criticalWhen: true,
+                metricKey: self::FINDING_2FA_DISABLED
+            ),
             'two_factor_auth_bypass_detected' => $this->field->bool(
                 'Two-Factor Auth Bypass Detected',
                 $bypassDetected,
@@ -305,6 +346,37 @@ class AdminAccountsReporter implements
                 description: '{value} active admin accounts have never logged in, above the limit of {threshold}.',
                 impact: 'An active account nobody uses is unnecessary attack surface and should be disabled.'
             ),
+            // Threshold 2 (fires at 3+) for both hygiene counts: a leftover password or two is normal
+            // churn; a pile of them is a posture problem, not an active-attack tripwire.
+            new MetricDefinition(
+                self::METRIC_STALE_PASSWORDS,
+                'Admin Accounts: Passwords Not Changed In A Year',
+                MetricDefinition::AGGREGATION_LATEST,
+                MetricDefinition::OPERATOR_GT,
+                2,
+                1500,
+                null,
+                description: '{value} active admin accounts have not changed their password in over a year, above the limit of {threshold}.',
+                impact: 'Long-lived passwords are more likely to have leaked or been reused elsewhere.'
+            ),
+            new MetricDefinition(
+                self::METRIC_STALE_LOGINS,
+                'Admin Accounts: Not Logged In For 90+ Days',
+                MetricDefinition::AGGREGATION_LATEST,
+                MetricDefinition::OPERATOR_GT,
+                2,
+                1500,
+                null,
+                description: '{value} active admin accounts have not logged in for over 90 days, above the limit of {threshold}.',
+                impact: 'Unused but active accounts are attack surface nobody is watching and should be disabled.'
+            ),
+            MetricDefinition::finding(
+                self::FINDING_2FA_DISABLED,
+                'Admin Accounts: Two-Factor Auth Disabled',
+                MetricDefinition::SEVERITY_CRITICAL,
+                'The Magento_TwoFactorAuth module is disabled or missing.',
+                'Admin logins are protected by a password alone.'
+            ),
             MetricDefinition::finding(
                 self::FINDING_2FA_BYPASS,
                 'Admin Accounts: Two-Factor Auth Bypass Detected',
@@ -313,6 +385,63 @@ class AdminAccountsReporter implements
                 'Admin accounts are effectively unprotected by 2FA regardless of enrollment.'
             ),
         ];
+    }
+
+    /**
+     * Active admin accounts whose most recent password change (admin_passwords.last_updated, or
+     * the account's creation when it has no password history) is over PASSWORD_MAX_AGE_DAYS old.
+     * A lookup failure counts as 0 rather than failing the reporter.
+     */
+    private function countStalePasswords(): int
+    {
+        try {
+            $connection = $this->resourceConnection->getConnection();
+            $changedAt = $connection->fetchPairs(
+                $connection->select()
+                    ->from(
+                        $this->resourceConnection->getTableName('admin_passwords'),
+                        ['user_id', new Expression('MAX(last_updated)')]
+                    )
+                    ->group('user_id')
+            );
+            $createdAt = $connection->fetchPairs(
+                $connection->select()
+                    ->from($this->resourceConnection->getTableName('admin_user'), ['user_id', 'created'])
+                    ->where('is_active = ?', 1)
+            );
+            $cutoff = $this->clock->now()->modify('-' . self::PASSWORD_MAX_AGE_DAYS . ' days')->getTimestamp();
+
+            $stale = 0;
+            foreach ($createdAt as $userId => $created) {
+                $timestamp = isset($changedAt[$userId])
+                    ? $this->toTimestamp($changedAt[$userId])
+                    : $this->toTimestamp($created);
+                if ($timestamp !== null && $timestamp < $cutoff) {
+                    $stale++;
+                }
+            }
+
+            return $stale;
+        } catch (Throwable) {
+            return 0;
+        }
+    }
+
+    /**
+     * A unix timestamp from either an integer-like value or a UTC "Y-m-d H:i:s" string; null if
+     * neither (pinned to UTC - never the ambient timezone).
+     *
+     * @param mixed $value
+     */
+    private function toTimestamp(mixed $value): ?int
+    {
+        if (is_numeric($value)) {
+            return (int)$value;
+        }
+
+        $parsed = is_string($value) ? strtotime($value . ' UTC') : false;
+
+        return $parsed === false ? null : $parsed;
     }
 
     /**
@@ -377,7 +506,7 @@ class AdminAccountsReporter implements
      */
     private function resolveTwoFactorAuth(): ?TfaInterface
     {
-        if (!$this->moduleList->has('Magento_TwoFactorAuth') || !interface_exists(TfaInterface::class)) {
+        if (!$this->moduleList->has(self::TFA_MODULE) || !interface_exists(TfaInterface::class)) {
             return null;
         }
 

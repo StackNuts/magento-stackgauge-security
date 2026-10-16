@@ -219,7 +219,32 @@ class ContentSignatureReporterTest extends TestCase
     {
         $metrics = $this->reporter()->getTrackableMetrics();
 
-        $this->assertCount(1, $metrics);
-        $this->assertSame('content_signatures.critical_matches', $metrics[0]->getMetricKey());
+        $this->assertSame(
+            ['content_signatures.critical_matches', 'content_signatures.no_signatures_loaded'],
+            array_map(static fn ($metric) => $metric->getMetricKey(), $metrics)
+        );
+    }
+
+    public function testZeroSignaturesIsACriticalFinding(): void
+    {
+        $fields = $this->reporter(signatureCount: 0)->getStatus()['general']->getFields();
+
+        $this->assertTrue($fields['no_signatures_loaded']->getValue());
+        $this->assertSame('content_signatures.no_signatures_loaded', $fields['no_signatures_loaded']->jsonSerialize()['metric_key']);
+        $this->assertSame('critical', $fields['signature_count']->jsonSerialize()['severity']);
+        $this->assertFalse($this->reporter()->getStatus()['general']->getFields()['no_signatures_loaded']->getValue());
+    }
+
+    public function testWarningOnlyMatchesDoNotMakeMatchesDetectedCritical(): void
+    {
+        $warning = [['location' => 'cms_block:a#1', 'signature_id' => 's', 'name' => 'S', 'severity' => 'warning']];
+        $critical = [['location' => 'cms_block:a#1', 'signature_id' => 's', 'name' => 'S', 'severity' => 'critical']];
+
+        $warningField = $this->reporter($warning)->getStatus()['general']->getFields()['matches_detected'];
+        $criticalField = $this->reporter($critical)->getStatus()['general']->getFields()['matches_detected'];
+
+        $this->assertTrue($warningField->getValue());
+        $this->assertArrayNotHasKey('critical_when', $warningField->jsonSerialize());
+        $this->assertTrue($criticalField->jsonSerialize()['critical_when']);
     }
 }

@@ -62,8 +62,23 @@ class CmsContentSourceTest extends TestCase
 
         [$batches, $return] = $this->consume($source->getBlockContentBatches());
 
-        $this->assertSame([['cms_block:footer' => '<p>Footer</p>']], $batches);
+        $this->assertSame([['cms_block:footer#1' => '<p>Footer</p>']], $batches);
         $this->assertFalse($return['truncated']);
+    }
+
+    public function testKeepsBlocksSharingAnIdentifierAcrossStoreViews(): void
+    {
+        $source = $this->source([
+            [
+                ['block_id' => 1, 'identifier' => 'footer', 'content' => 'store one'],
+                ['block_id' => 2, 'identifier' => 'footer', 'content' => 'store two'],
+            ],
+            [],
+        ]);
+
+        [$batches] = $this->consume($source->getBlockContentBatches());
+
+        $this->assertSame([['cms_block:footer#1' => 'store one', 'cms_block:footer#2' => 'store two']], $batches);
     }
 
     public function testPagesThroughMultipleBatches(): void
@@ -86,7 +101,7 @@ class CmsContentSourceTest extends TestCase
 
         $this->assertCount(2, $batches);
         $this->assertCount(500, $batches[0]);
-        $this->assertSame(['cms_block:b' => 'two'], $batches[1]);
+        $this->assertSame(['cms_block:b#501' => 'two'], $batches[1]);
         $this->assertFalse($return['truncated']);
     }
 
@@ -99,7 +114,7 @@ class CmsContentSourceTest extends TestCase
 
         [$batches] = $this->consume($source->getPageContentBatches());
 
-        $this->assertSame([['cms_page:home' => '<p>Home</p>']], $batches);
+        $this->assertSame([['cms_page:home#1' => '<p>Home</p>']], $batches);
     }
 
     public function testFlagsTruncatedWhenTheSafetyBackstopIsHit(): void

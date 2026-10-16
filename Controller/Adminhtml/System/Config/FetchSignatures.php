@@ -10,8 +10,10 @@ namespace StackNuts\StackGaugeSecurity\Controller\Adminhtml\System\Config;
 
 use Magento\Backend\App\Action;
 use Magento\Framework\App\Action\HttpPostActionInterface;
+use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Controller\Result\Json;
 use Magento\Framework\Controller\Result\JsonFactory;
+use Magento\Store\Model\ScopeInterface;
 use StackNuts\StackGaugeSecurity\Model\Util\SignatureFeedFetcher;
 use StackNuts\StackGaugeSecurity\Model\Util\SignatureStatusText;
 use StackNuts\StackGaugeSecurity\Model\Util\SignatureStore;
@@ -34,13 +36,15 @@ class FetchSignatures extends Action implements HttpPostActionInterface
      * @param SignatureFeedFetcher $fetcher
      * @param SignatureStore $signatureStore
      * @param SignatureStatusText $statusText
+     * @param ScopeConfigInterface $scopeConfig
      */
     public function __construct(
         Action\Context $context,
         private readonly JsonFactory $resultJsonFactory,
         private readonly SignatureFeedFetcher $fetcher,
         private readonly SignatureStore $signatureStore,
-        private readonly SignatureStatusText $statusText
+        private readonly SignatureStatusText $statusText,
+        private readonly ScopeConfigInterface $scopeConfig
     ) {
         parent::__construct($context);
     }
@@ -53,6 +57,13 @@ class FetchSignatures extends Action implements HttpPostActionInterface
     public function execute(): Json
     {
         $result = $this->resultJsonFactory->create();
+
+        if (!$this->scopeConfig->isSetFlag('stacknuts_stackgauge/general/signature_feed_enabled', ScopeInterface::SCOPE_STORE)) {
+            return $result->setData([
+                'success' => false,
+                'message' => (string)__('Signature feed updates are turned off; the bundled signature set is in use.'),
+            ]);
+        }
 
         try {
             $success = $this->fetcher->refresh();

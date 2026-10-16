@@ -1,13 +1,13 @@
 {
-    "version": "2026.10.0",
+    "version": "2026.10.1",
     "signatures": [
         {
             "id": "webshell-eval-base64",
             "name": "eval() of base64-decoded PHP",
             "severity": "critical",
             "target": ["pub_php"],
-            "pattern_type": "literal",
-            "pattern": "eval(base64_decode(",
+            "pattern_type": "regex",
+            "pattern": "/eval\\s*\\(\\s*base64_decode\\s*\\(/i",
             "description": "Classic webshell obfuscation: decode a base64 payload and eval() it directly. Legitimate code essentially never does this."
         },
         {
@@ -15,8 +15,8 @@
             "name": "eval() of gzinflate-decompressed PHP",
             "severity": "critical",
             "target": ["pub_php"],
-            "pattern_type": "literal",
-            "pattern": "eval(gzinflate(",
+            "pattern_type": "regex",
+            "pattern": "/eval\\s*\\(\\s*gzinflate\\s*\\(/i",
             "description": "Same obfuscation pattern as webshell-eval-base64 using gzinflate instead of/alongside base64 to compress the payload."
         },
         {
@@ -25,7 +25,7 @@
             "severity": "critical",
             "target": ["pub_php"],
             "pattern_type": "regex",
-            "pattern": "/assert\\s*\\(\\s*\\$_(POST|REQUEST|GET)/",
+            "pattern": "/assert\\s*\\(\\s*\\$_(POST|REQUEST|GET)/i",
             "description": "assert() historically evaluated its string argument as PHP code - passing request input directly to it is a remote-code-execution webshell pattern, not something legitimate code does."
         },
         {
@@ -34,7 +34,7 @@
             "severity": "critical",
             "target": ["pub_php"],
             "pattern_type": "regex",
-            "pattern": "/(system|passthru|shell_exec|proc_open|popen)\\s*\\(\\s*\\$_(POST|REQUEST|GET)/",
+            "pattern": "/(system|passthru|shell_exec|proc_open|popen)\\s*\\(\\s*\\$_(POST|REQUEST|GET)/i",
             "description": "Passes request input directly to a shell-execution function - the defining trait of a command-execution webshell."
         },
         {
@@ -43,7 +43,7 @@
             "severity": "critical",
             "target": ["pub_php"],
             "pattern_type": "regex",
-            "pattern": "/(c99shell|r57shell|FilesMan|WSO\\s?[Ss]hell)/",
+            "pattern": "/(c99shell|r57shell|FilesMan|WSO\\s?shell)/i",
             "description": "Literal name/marker strings used by long-documented, widely-reused public webshell families. Presence alone is a strong signal regardless of the surrounding code."
         },
         {
@@ -51,8 +51,8 @@
             "name": "eval() of base64-decoded script content",
             "severity": "critical",
             "target": ["cms_content", "design_config"],
-            "pattern_type": "literal",
-            "pattern": "eval(atob(",
+            "pattern_type": "regex",
+            "pattern": "/eval\\s*\\(\\s*atob\\s*\\(/i",
             "description": "Decodes a base64 string and eval()s it inline - the same obfuscation technique as webshell-eval-base64, applied to injected storefront JavaScript (a common Magecart/skimmer loader pattern) rather than PHP."
         },
         {
